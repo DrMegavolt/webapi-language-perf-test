@@ -83,3 +83,7 @@ test:
 production:
   <<: *default
   database: app_production
+  # Active Record pool cap: POOL_SIZE env var, default 8 (per SPEC);
+  # non-numeric values fall back to 8. Explicit max_connections (Rails 8 name
+  # for the legacy "pool" key) so nothing else (e.g. RAILS_MAX_THREADS) pins it.
+  max_connections: <%= (v = ENV["POOL_SIZE"].to_s).match?(/\A\d+\z/) ? v.to_i : 8 %>

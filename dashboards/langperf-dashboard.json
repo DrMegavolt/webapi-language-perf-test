@@ -139,6 +139,79 @@
           "legendFormat": "{{pod}}"
         }
       ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Postgres active connections (backends)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "postgresql_backends{service_name=\"langperf-postgres\"}", "legendFormat": "backends" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Postgres transactions/sec (commits vs rollbacks)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "rate(postgresql_commits_total{service_name=\"langperf-postgres\"}[1m])", "legendFormat": "commits" },
+        { "expr": "rate(postgresql_rollbacks_total{service_name=\"langperf-postgres\"}[1m])", "legendFormat": "rollbacks" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Postgres row ops/sec by type (otel: postgresql_operations)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "sum by (operation) (rate(postgresql_operations_total{service_name=\"langperf-postgres\"}[1m]))", "legendFormat": "{{operation}}" }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Postgres CPU (cores; limit 6)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"langperf\",pod=\"postgres-0\",container!=\"\"}[$__rate_interval]))", "legendFormat": "postgres" }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Postgres memory working set (limit 3Gi)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "container_memory_working_set_bytes{namespace=\"langperf\",pod=\"postgres-0\",container!=\"\"}", "legendFormat": "postgres" }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Postgres DB size (bytes)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "postgresql_db_size_bytes{service_name=\"langperf-postgres\"}", "legendFormat": "bench db" }
+      ]
     }
   ]
 }

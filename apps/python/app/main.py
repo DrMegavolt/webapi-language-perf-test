@@ -24,6 +24,12 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgres://bench:bench@localhost:5432/bench"
 )
 
+# Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
+try:
+    POOL_SIZE = int(os.environ["POOL_SIZE"])
+except (KeyError, ValueError):
+    POOL_SIZE = 8
+
 INT64_MIN = -(2**63)
 INT64_MAX = 2**63 - 1
 
@@ -108,7 +114,7 @@ class MetricsMiddleware:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.pool = await asyncpg.create_pool(
-        DATABASE_URL, min_size=2, max_size=8
+        DATABASE_URL, min_size=2, max_size=POOL_SIZE
     )
     try:
         yield

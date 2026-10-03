@@ -347,7 +347,8 @@ static string BuildConnectionString(string url)
         Host = uri.Host,
         Port = uri.Port > 0 ? uri.Port : 5432,
         Database = uri.AbsolutePath.TrimStart('/'),
-        MaxPoolSize = 8,
+        // Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
+        MaxPoolSize = int.TryParse(Environment.GetEnvironmentVariable("POOL_SIZE"), out var ps) && ps > 0 ? ps : 8,
     };
 
     var userInfo = uri.UserInfo.Split(':', 2);

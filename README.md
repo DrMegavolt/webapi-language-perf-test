@@ -71,46 +71,22 @@ with its highest CPU per request (0.15 cores at just 200 rps).
 
 Rust 8MB · Go 15MB · Express 39MB · Python 42MB · NestJS 51MB · .NET 73MB · Rails 109MB
 
-## Phase 2 — breaking-point search
+## Phase 3 — 10k users, pool 32
 
-![limits](results/limits.png)
+An earlier breaking-point search (adaptive ladder, pool=8) was **removed from the record**:
+with only 8 pooled connections per app, the measured "limits" were mostly the pool's drain
+rate, not the stacks' — apps died of pool-queue collapse (latency seconds, CPU idle, 100%
+still served) rather than real saturation.
 
-Method: per stack, an adaptive ladder starts at 2k rps, **jumps ×4 when a level looks easy**
-(p99 < 150ms, cpu < 0.85), ×2 otherwise, and on first failure **geometric-bisects** between
-last pass and first fail. The found limit is then **confirmed with 3 fresh-DB runs**.
-Gate: `p99 < 1s`, zero 5xx, zero k6 failed requests, zero dropped iterations, and
-**served ≥ 95% of offered** (the throughput clause catches silent load-shedding — without
-it, a saturated app can "pass" while dropping half its offered requests).
+Phase 3 reruns all 8 stacks at a fixed **10,000 rps** ("users") with the constraint removed:
+`POOL_SIZE=32`, **1 CPU per app kept** (deliberate — at 10k rps per-request CPU cost becomes
+the binding constraint), fresh-seeded DB per stack, 3 runs per stack for averages, same
+k6 mix (75% reads / 25% writes) and same gate (p99 < 1s, 0 errors, 0 dropped, served ≥ 95%).
+Results: [`results/phase3/`](results/phase3) + `results/phase3-summary.md`.
 
-Stable limits (highest load where *every* run passed; full curves in
-[`results/limits-summary.md`](results/limits-summary.md)):
-
-| stack | stable limit (rps) | confirm p99 @ limit | bottleneck |
-|---|---|---|---|
-| Go (Gin) | **8,000** | 212 ms | queueing collapse past ~8.7k |
-| Rust (Actix) | 3,600 | 2.5 ms | cliff: 2ms → 4.9s between 3.6k and 4k |
-| TS (NestJS Fastify) | 2,800 (borderline to 3,300) | ~6 ms @ 3.3k clean runs | cliff, soft edge |
-| Bun (native) | 3,100 | 9.7 ms | cliff: 18ms → 10s between 3.1k and 3.4k |
-| .NET (minimal) | 2,600 | 10.3 ms | cliff |
-| TS (Express) | 2,200 | 8.0 ms | cliff |
-| Python (FastAPI) | 1,700 | 2.0 ms | cliff |
-| Ruby (Rails 8 YJIT) | 1,100 | 7.9 ms | app CPU (the only true CPU-bound failure) |
-
-Observations:
-
-- **Go is in a class of its own** — it serves the full 8,000 rps at p99 ~210ms using 0.7
-  cores, then collapses within ~9% more load. Its failure mode is graceful (rising tail),
-  everyone else's is a wall (sub-50ms → multi-second).
-- **Bun confirms the "faster than Node" hypothesis** in efficiency: at 2,400 rps it used
-  0.32 cores vs Express's 0.63 and NestJS's 0.47, and its limit (3,100) beats Express (2,200)
-  — but native Bun does not reach NestJS-Fastify territory (3,300 borderline / 2,800 strict)
-  or Rust/Go.
-- Most stacks fail not by CPU saturation but by a **queueing collapse** — served throughput
-  plateaus at capacity while the tail explodes. Rails is the only stack that genuinely
-  ran out of CPU first.
-- k6 itself never starved: at 64k offered it used ≤1.4 of its 6 cores; Postgres (6-core
-  limit) stayed below 4.1 cores at every stack's limit — failures below ~9k rps are
-  attributable to the app stack, not the rig.
+Postgres observability: pg_stat_statements is preloaded, and an OpenTelemetry collector
+(`langperf/otel-postgres`) scrapes the DB and ships `postgresql_*` metrics to Prometheus
+via OTLP — see the DB panels in the Grafana dashboard.
 
 ## The lesson that shaped the benchmark
 

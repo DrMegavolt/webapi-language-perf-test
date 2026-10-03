@@ -17,9 +17,12 @@ const PORT = Number(process.env.PORT) || 8080;
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgres://bench:bench@127.0.0.1:5432/bench';
 
+// Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
+const poolSize = Number.parseInt(process.env.POOL_SIZE, 10) || 8;
+
 const pool = new pg.Pool({
   connectionString: DATABASE_URL,
-  max: 8,
+  max: poolSize,
 });
 
 // ---------------------------------------------------------------------------

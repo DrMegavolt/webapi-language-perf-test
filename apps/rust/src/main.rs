@@ -373,8 +373,13 @@ async fn main() -> std::io::Result<()> {
             recycling_method: RecyclingMethod::Fast,
         },
     );
+    // Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
+    let pool_size: usize = std::env::var("POOL_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
     let pool = Pool::builder(manager)
-        .max_size(8)
+        .max_size(pool_size)
         .build()
         .expect("failed to build connection pool");
 

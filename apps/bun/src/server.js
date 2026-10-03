@@ -63,11 +63,13 @@ ON CONFLICT (post_id, user_id) DO NOTHING`;
 const Q4C_COUNT = `SELECT COUNT(*)::bigint AS like_count FROM likes WHERE post_id = $1`;
 
 // ---------------------------------------------------------------------------
-// DB client — one pooled client, max 8 connections (same as every stack).
+// DB client — one pooled client. Pool cap: POOL_SIZE env var, default 8
+// (same as every stack); non-numeric → 8.
 // ---------------------------------------------------------------------------
+const poolSize = Number.parseInt(process.env.POOL_SIZE ?? "", 10) || 8;
 const sql = new SQL({
   url: process.env.DATABASE_URL || "postgres://localhost:5432/bench",
-  max: 8,
+  max: poolSize,
   idleTimeout: 30,
   maxLifetime: 0,
 });

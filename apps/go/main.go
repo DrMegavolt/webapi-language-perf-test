@@ -107,7 +107,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("parse DATABASE_URL: %v", err)
 	}
+	// Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
 	cfg.MaxConns = 8
+	if v := os.Getenv("POOL_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxConns = int32(n)
+		}
+	}
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {

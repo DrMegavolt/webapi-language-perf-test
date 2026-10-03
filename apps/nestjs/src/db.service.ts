@@ -10,9 +10,11 @@ export class DbService implements OnModuleDestroy {
   private readonly pool: Pool;
 
   constructor() {
+    // Pool cap: POOL_SIZE env var, default 8 (per SPEC); non-numeric → 8.
+    const poolSize = Number.parseInt(process.env.POOL_SIZE ?? '', 10) || 8;
     this.pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      max: 8,
+      max: poolSize,
     });
   }
 
