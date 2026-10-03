@@ -1,9 +1,10 @@
 # webapi-language-perf-test
 
-One tiny Twitter-style API, implemented in **7 language stacks**, benchmarked head-to-head
+One tiny Twitter-style API, implemented in **8 language stacks**, benchmarked head-to-head
 inside a Kubernetes cluster with identical resources, identical SQL, identical load —
 latency percentiles taken from **Prometheus** (scraped off each app's own histograms) and
-visualized in **Grafana**.
+visualized in **Grafana**. Phase 2 finds each stack's **breaking point** with an adaptive
+load ladder.
 
 ![comparison](results/comparison.png)
 
@@ -16,6 +17,7 @@ backed by Postgres seeded with **50,000 users / 500,000 posts / ~2.2M likes**.
 |---|---|---|
 | `apps/go` | Go 1.25 · Gin v1 · pgx v5 | `localhost:32000/langperf/go:v1` |
 | `apps/rust` | Rust · Actix-web 4 · tokio-postgres + deadpool | `…/rust:v1` |
+| `apps/bun` | **Bun 1.4 · native `Bun.serve` + built-in Postgres SQL (zero deps)** | `…/bun:v1` |
 | `apps/python` | Python 3.12 · FastAPI · uvicorn[standard] · asyncpg | `…/python:v1` |
 | `apps/express` | Node 22 · Express 5 · pg | `…/express:v1` |
 | `apps/nestjs` | Node 22 · NestJS 11 (FastifyAdapter) · pg | `…/nestjs:v1` |
@@ -68,6 +70,47 @@ with its highest CPU per request (0.15 cores at just 200 rps).
 ### RAM (max working set, 1Gi limit)
 
 Rust 8MB · Go 15MB · Express 39MB · Python 42MB · NestJS 51MB · .NET 73MB · Rails 109MB
+
+## Phase 2 — breaking-point search
+
+![limits](results/limits.png)
+
+Method: per stack, an adaptive ladder starts at 2k rps, **jumps ×4 when a level looks easy**
+(p99 < 150ms, cpu < 0.85), ×2 otherwise, and on first failure **geometric-bisects** between
+last pass and first fail. The found limit is then **confirmed with 3 fresh-DB runs**.
+Gate: `p99 < 1s`, zero 5xx, zero k6 failed requests, zero dropped iterations, and
+**served ≥ 95% of offered** (the throughput clause catches silent load-shedding — without
+it, a saturated app can "pass" while dropping half its offered requests).
+
+Stable limits (highest load where *every* run passed; full curves in
+[`results/limits-summary.md`](results/limits-summary.md)):
+
+| stack | stable limit (rps) | confirm p99 @ limit | bottleneck |
+|---|---|---|---|
+| Go (Gin) | **8,000** | 212 ms | queueing collapse past ~8.7k |
+| Rust (Actix) | 3,600 | 2.5 ms | cliff: 2ms → 4.9s between 3.6k and 4k |
+| TS (NestJS Fastify) | 2,800 (borderline to 3,300) | ~6 ms @ 3.3k clean runs | cliff, soft edge |
+| Bun (native) | 3,100 | 9.7 ms | cliff: 18ms → 10s between 3.1k and 3.4k |
+| .NET (minimal) | 2,600 | 10.3 ms | cliff |
+| TS (Express) | 2,200 | 8.0 ms | cliff |
+| Python (FastAPI) | 1,700 | 2.0 ms | cliff |
+| Ruby (Rails 8 YJIT) | 1,100 | 7.9 ms | app CPU (the only true CPU-bound failure) |
+
+Observations:
+
+- **Go is in a class of its own** — it serves the full 8,000 rps at p99 ~210ms using 0.7
+  cores, then collapses within ~9% more load. Its failure mode is graceful (rising tail),
+  everyone else's is a wall (sub-50ms → multi-second).
+- **Bun confirms the "faster than Node" hypothesis** in efficiency: at 2,400 rps it used
+  0.32 cores vs Express's 0.63 and NestJS's 0.47, and its limit (3,100) beats Express (2,200)
+  — but native Bun does not reach NestJS-Fastify territory (3,300 borderline / 2,800 strict)
+  or Rust/Go.
+- Most stacks fail not by CPU saturation but by a **queueing collapse** — served throughput
+  plateaus at capacity while the tail explodes. Rails is the only stack that genuinely
+  ran out of CPU first.
+- k6 itself never starved: at 64k offered it used ≤1.4 of its 6 cores; Postgres (6-core
+  limit) stayed below 4.1 cores at every stack's limit — failures below ~9k rps are
+  attributable to the app stack, not the rig.
 
 ## The lesson that shaped the benchmark
 

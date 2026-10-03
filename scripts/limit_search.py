@@ -24,8 +24,8 @@ from datetime import datetime, timezone
 NS = "langperf"
 PROM = "http://192.168.1.174:9090"
 DURATION_S = 150
-START_LEVEL = 2000
-MAX_LEVEL = 64000
+START_LEVEL = int(os.environ.get("START_LEVEL", "2000"))
+MAX_LEVEL = int(os.environ.get("MAX_LEVEL", "64000"))
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTDIR = os.path.join(REPO, "results", "limits")
 

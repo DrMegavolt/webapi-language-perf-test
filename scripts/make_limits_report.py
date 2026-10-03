@@ -13,10 +13,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIMITS = os.path.join(HERE, "..", "results", "limits")
 RESULTS = os.path.join(HERE, "..", "results")
 
-ORDER = ["go", "rust", "express", "nestjs", "python", "rails", "dotnet"]
+ORDER = ["go", "rust", "bun", "express", "nestjs", "python", "rails", "dotnet"]
 NAMES = {
     "go": "Go (Gin)",
     "rust": "Rust (Actix)",
+    "bun": "Bun (native serve + SQL)",
     "express": "TS (Express)",
     "nestjs": "TS (NestJS)",
     "python": "Python (FastAPI)",
@@ -26,6 +27,7 @@ NAMES = {
 COLORS = {
     "go": "#0ea5e9",
     "rust": "#f97316",
+    "bun": "#f43f5e",
     "express": "#eab308",
     "nestjs": "#ef4444",
     "python": "#22c55e",
@@ -43,7 +45,7 @@ def load():
     return out
 
 
-def chart(data):
+def chart(data, stable):
     fig, axes = plt.subplots(1, 2, figsize=(15, 6), gridspec_kw={"width_ratios": [3, 2]})
 
     ax = axes[0]
@@ -77,7 +79,7 @@ def chart(data):
 
     ax2 = axes[1]
     apps = [a for a in ORDER if a in data]
-    limits = [data[a]["limit_rps"] for a in apps]
+    limits = [stable[a][0] for a in apps]
     bars = ax2.barh([NAMES[a] for a in apps][::-1], limits[::-1],
                     color=[COLORS[a] for a in apps][::-1])
     for b, v in zip(bars, limits[::-1]):
@@ -95,26 +97,41 @@ def chart(data):
     print(f"chart saved: {out}")
 
 
-def report(data):
+def stable_limit(d):
+    """Max offered level where ALL runs passed the gate; levels above with mixed
+    results are reported as unstable."""
+    by_level = {}
+    for c in d["curve"]:
+        by_level.setdefault(c["offered_rps"], []).append(bool(c.get("gate_pass")))
+    all_pass = sorted(lvl for lvl, runs in by_level.items() if all(runs))
+    stable = max(all_pass) if all_pass else 0
+    unstable = sorted(lvl for lvl, runs in by_level.items()
+                      if lvl > stable and any(runs) and not all(runs))
+    return stable, unstable
+
+
+def report(data, stable):
     lines = [
         "## Breaking-point search — adaptive ladder (2k start, ×4 jumps when easy, geometric bisection on failure)",
         "",
-        "Gate: p99 < 1s AND 0× 5xx AND 0 k6 failed requests AND 0 dropped iterations.",
-        "Limit = highest offered load passing the gate; confirmed with 3 runs (averages below). Fresh-seeded DB per stack.",
+        "Gate: p99 < 1s AND 0× 5xx AND 0 k6 failed requests AND 0 dropped iterations AND served ≥ 95% of offered.",
+        "Stable limit = highest offered load where **every** run passed the gate (fresh-seeded DB per stack).",
         "",
-        "| stack | limit (rps) | first fail | bottleneck at failure | confirm p99 avg (ms) | confirm 5xx |",
-        "|---|---|---|---|---|---|",
+        "| stack | stable limit (rps) | unstable above | first fail | bottleneck at failure | confirm p99 avg (ms) | confirm 5xx |",
+        "|---|---|---|---|---|---|---|",
     ]
     for app in ORDER:
         d = data.get(app)
         if not d:
             continue
+        st, unst = stable[app]
         cp99 = [p for p in d.get("confirm_p99_ms", []) if p is not None]
         avg99 = round(sum(cp99) / len(cp99), 1) if cp99 else "n/a"
         cerr = d.get("confirm_err", [])
         cerr_s = f"{round(100 * sum(cerr) / len(cerr), 4)}%" if cerr else "n/a"
         lines.append(
-            f"| {NAMES[app]} | {int(d['limit_rps']):,} | {d.get('first_fail_rps') or '—'} "
+            f"| {NAMES[app]} | {int(st):,} | {(', '.join(f'{int(u):,}' for u in unst)) or '—'} "
+            f"| {d.get('first_fail_rps') or '—'} "
             f"| {d.get('bottleneck_at_first_fail')} | {avg99} | {cerr_s} |"
         )
     lines += ["", "### Full search curves", ""]
@@ -145,8 +162,9 @@ def main():
     if not data:
         print("no limit results yet")
         return
-    chart(data)
-    report(data)
+    stable = {app: stable_limit(d) for app, d in data.items()}
+    chart(data, stable)
+    report(data, stable)
 
 
 if __name__ == "__main__":
