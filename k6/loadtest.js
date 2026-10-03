@@ -41,19 +41,20 @@ const scenario =
           { target: 1800, duration: '30s' },
         ],
         preAllocatedVUs: 400,
-        maxVUs: 2000,
+        maxVUs: 20000,
       }
     : {
         executor: 'constant-arrival-rate',
         rate: RATE,
         timeUnit: '1s',
         duration: DURATION,
-        preAllocatedVUs: 200,
-        maxVUs: 1000,
+        preAllocatedVUs: Math.min(6000, Math.max(500, Math.round(RATE / 3))),
+        maxVUs: 20000,
       };
 
 export const options = {
   scenarios: { mixed: scenario },
+  summaryTrendStats: ['avg', 'p(50)', 'p(95)', 'p(99)', 'p(99.9)', 'max'],
   // thresholds are intentionally loose; they exist to force per-endpoint sub-metrics
   thresholds: {
     http_req_failed: ['rate<0.90'],
@@ -95,26 +96,30 @@ export default function () {
 function round2(x) { return x == null ? null : Math.round(x * 100) / 100; }
 
 export function handleSummary(data) {
+  // k6 v2: every metric is {type, contains, values:{...}}
   const m = data.metrics;
-  const dur = m.http_req_duration || {};
+  const V = (n) => (m[n] && m[n].values) || {};
+  const dur = V('http_req_duration');
+  const sub = (name) => V(`http_req_duration{name:${name}}`);
   const per = (name) => {
-    const d = m[`http_req_duration{name:${name}}`];
-    return d
+    const d = sub(name);
+    return d['p(50)'] != null
       ? { p50: round2(d['p(50)']), p95: round2(d['p(95)']), p999: round2(d['p(99.9)']) }
       : null;
   };
   const out = {
     mode: MODE,
-    rps: round2(m.http_reqs ? m.http_reqs.rate : 0),
-    iterations: m.iterations ? m.iterations.count : 0,
+    offered_rate: RATE,
+    rps: round2(V('http_reqs')['rate']),
+    iterations: V('iterations')['count'],
     p50_ms: round2(dur['p(50)']),
     p95_ms: round2(dur['p(95)']),
     p99_ms: round2(dur['p(99)']),
     p999_ms: round2(dur['p(99.9)']),
-    max_ms: round2(dur.max || 0),
-    failed_rate: m.http_req_failed ? round2((m.http_req_failed.rate || 0) * 10000) / 10000 : 0,
-    checks_rate: m.checks ? round2((m.checks.rate || 0) * 10000) / 10000 : 0,
-    dropped_iterations: m.dropped_iterations ? m.dropped_iterations.count : 0,
+    max_ms: round2(dur['max']),
+    failed_rate: V('http_req_failed')['rate'],
+    checks_rate: V('checks')['rate'],
+    dropped_iterations: V('dropped_iterations')['count'] || 0,
     per_endpoint: {
       'GET /feed': per('GET /feed'),
       'GET /posts/:id': per('GET /posts/:id'),
