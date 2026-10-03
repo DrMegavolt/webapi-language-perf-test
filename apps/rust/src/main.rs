@@ -122,14 +122,18 @@ async fn metrics_mw(
 // Canonical SQL — must match sql/queries.sql exactly (Q1, Q2, Q3, Q4a-c)
 // ---------------------------------------------------------------------------
 
-const Q_FEED: &str = "SELECT p.id, p.user_id, u.username, p.content, p.created_at, \
-                            COUNT(l.id)::bigint AS like_count \
-                     FROM posts p \
-                     JOIN users u ON u.id = p.user_id \
-                     LEFT JOIN likes l ON l.post_id = p.id \
-                     GROUP BY p.id, p.user_id, u.username, p.content, p.created_at \
-                     ORDER BY p.created_at DESC, p.id DESC \
-                     LIMIT 20 OFFSET ($1 - 1) * 20";
+const Q_FEED: &str = "WITH feed AS ( \
+                            SELECT p.id, p.user_id, p.content, p.created_at \
+                            FROM posts p \
+                            ORDER BY p.created_at DESC, p.id DESC \
+                            LIMIT 20 OFFSET ($1 - 1) * 20 ) \
+                      SELECT f.id, f.user_id, u.username, f.content, f.created_at, \
+                             COUNT(l.id)::bigint AS like_count \
+                      FROM feed f \
+                      JOIN users u ON u.id = f.user_id \
+                      LEFT JOIN likes l ON l.post_id = f.id \
+                      GROUP BY f.id, f.user_id, u.username, f.content, f.created_at \
+                      ORDER BY f.created_at DESC, f.id DESC";
 
 const Q_POST: &str = "SELECT p.id, p.user_id, u.username, p.content, p.created_at, \
                             COUNT(l.id)::bigint AS like_count \

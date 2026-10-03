@@ -63,7 +63,7 @@ queries, joins, or round-trips. Only allowed substitution: computing
 
 ## Endpoints
 
-### GET /feed?page=N  (default page 1; 20 items per page)
+### GET /feed?page=N  (default page 1; 20 items per page)  (canonical Q1 — CTE form is required, see sql/queries.sql)
 ```sql
 SELECT p.id, p.user_id, u.username, p.content, p.created_at,
        COUNT(l.id)::bigint AS like_count

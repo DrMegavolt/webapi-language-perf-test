@@ -8,15 +8,23 @@
 --   ("LIMIT 20 OFFSET $2") — that substitution is canonical too.
 -- ============================================================================
 
--- Q1 (GET /feed?page=N): home feed, newest 20 posts with author + like count
-SELECT p.id, p.user_id, u.username, p.content, p.created_at,
+-- Q1 (GET /feed?page=N): home feed, newest 20 posts with author + like count.
+-- NOTE: the CTE is REQUIRED — it forces the planner to pick 20 posts via the
+-- posts(created_at DESC, id DESC) index BEFORE joining/counting likes. A flat
+-- JOIN+GROUP BY of the whole table seq-scans 2.2M likes and spills to disk.
+WITH feed AS (
+  SELECT p.id, p.user_id, p.content, p.created_at
+  FROM posts p
+  ORDER BY p.created_at DESC, p.id DESC
+  LIMIT 20 OFFSET ($1 - 1) * 20
+)
+SELECT f.id, f.user_id, u.username, f.content, f.created_at,
        COUNT(l.id)::bigint AS like_count
-FROM posts p
-JOIN users u ON u.id = p.user_id
-LEFT JOIN likes l ON l.post_id = p.id
-GROUP BY p.id, p.user_id, u.username, p.content, p.created_at
-ORDER BY p.created_at DESC, p.id DESC
-LIMIT 20 OFFSET ($1 - 1) * 20;
+FROM feed f
+JOIN users u ON u.id = f.user_id
+LEFT JOIN likes l ON l.post_id = f.id
+GROUP BY f.id, f.user_id, u.username, f.content, f.created_at
+ORDER BY f.created_at DESC, f.id DESC;
 
 -- Q2 (GET /posts/:id): single post with author + like count
 SELECT p.id, p.user_id, u.username, p.content, p.created_at,

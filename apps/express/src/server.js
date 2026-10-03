@@ -131,14 +131,19 @@ app.get('/feed', async (req, res, next) => {
   page = Math.floor(page);
 
   const { rows } = await pool.query(
-    `SELECT p.id, p.user_id, u.username, p.content, p.created_at,
+    `WITH feed AS (
+       SELECT p.id, p.user_id, p.content, p.created_at
+       FROM posts p
+       ORDER BY p.created_at DESC, p.id DESC
+       LIMIT 20 OFFSET ($1 - 1) * 20
+     )
+     SELECT f.id, f.user_id, u.username, f.content, f.created_at,
             COUNT(l.id)::bigint AS like_count
-     FROM posts p
-     JOIN users u ON u.id = p.user_id
-     LEFT JOIN likes l ON l.post_id = p.id
-     GROUP BY p.id, p.user_id, u.username, p.content, p.created_at
-     ORDER BY p.created_at DESC, p.id DESC
-     LIMIT 20 OFFSET ($1 - 1) * 20`,
+     FROM feed f
+     JOIN users u ON u.id = f.user_id
+     LEFT JOIN likes l ON l.post_id = f.id
+     GROUP BY f.id, f.user_id, u.username, f.content, f.created_at
+     ORDER BY f.created_at DESC, f.id DESC`,
     [page],
   );
   res.status(200).json({ page, posts: rows });
