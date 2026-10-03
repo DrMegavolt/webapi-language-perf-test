@@ -70,10 +70,21 @@ def main(app):
     first_fail = None
     fail_rec = None
 
+    def run_once(rate, label):
+        rec = K.run_k6(app, rate, label, OUTDIR, duration_s=DURATION_S)
+        curve.append(rec)
+        # sanity: a "completed" run with zero iterations is invalid — retry once
+        if rec["k6_completed"] and not rec.get("k6_iterations"):
+            K.log(f"invalid run (0 iterations) at {rate} — retrying once")
+            time.sleep(15)
+            curve.pop()
+            rec = K.run_k6(app, rate, label, OUTDIR, duration_s=DURATION_S)
+            curve.append(rec)
+        return rec
+
     level = START_LEVEL
     while level <= MAX_LEVEL:
-        rec = K.run_k6(app, level, "search", OUTDIR, duration_s=DURATION_S)
-        curve.append(rec)
+        rec = run_once(level, "search")
         if rec["gate_pass"]:
             last_pass = level
             easy = rec.get("p99_ms", 1e9) < 150 and (rec.get("cpu_avg_cores") or 0) < 0.85
@@ -85,6 +96,18 @@ def main(app):
             first_fail = level
             fail_rec = rec
             break
+
+    # failed right at the start: probe downward (half each step) until first pass
+    if first_fail is not None and last_pass == 0:
+        level = first_fail // 2
+        while level >= 250 and last_pass == 0:
+            rec = run_once(level, "probe")
+            if rec["gate_pass"]:
+                last_pass = level
+            else:
+                first_fail = level
+                fail_rec = rec
+                level //= 2
 
     iters = 0
     if first_fail is not None and last_pass > 0:
