@@ -9,7 +9,7 @@ Stable limit = highest offered load where **every** run passed the gate (fresh-s
 | Rust (Actix) | 3,600 | — | 4000 | latency collapse (queueing) | 2.5 | 0.0% |
 | Bun (native serve + SQL) | 3,100 | — | 3400 | latency collapse (queueing) | 9.7 | 0.0% |
 | TS (Express) | 2,200 | — | 2400 | latency collapse (queueing) | 8.0 | 0.0% |
-| TS (NestJS) | 3,600 | — | 4000 | latency collapse (queueing) | 52.2 | 0.0% |
+| TS (NestJS) | 2,800 | 3,300, 3,600 | 4000 | latency collapse (queueing) | 52.2 | 0.0% |
 | Python (FastAPI) | 1,700 | — | 2000 | latency collapse (queueing) | 2.0 | 0.0% |
 | Ruby (Rails) | 1,100 | — | 1300 | app CPU (1 core) | 7.9 | 0.0% |
 | .NET (minimal) | 2,600 | — | 2800 | latency collapse (queueing) | 10.3 | 0.0% |
@@ -92,6 +92,9 @@ Stable limit = highest offered load where **every** run passed the gate (fresh-s
 | 3,300 | confirm2 | 1.54 | 7.07 | 2829.19 | 0.0 | 0 | 0.608 | 1.304 | PASS |
 | 3,300 | confirm3 | 1.51 | 4.88 | 2881.55 | 0.0 | 0 | 0.604 | 1.255 | PASS |
 | 3,600 | bisect | 1.78 | 5.04 | 3448.05 | 0.0 | 0 | 0.747 | 1.496 | PASS |
+| 3,600 | confirm1 | None | 89.18 | 3600 | 0.0 | 0 | 0.679 | 1.467 | PASS |
+| 3,600 | confirm2 | None | 4040.86 | 3497 | 0.0 | 11843 | 0.757 | 1.516 | FAIL |
+| 3,600 | confirm3 | None | 2234.27 | 3596 | 0.0 | 613 | 0.741 | 1.6 | FAIL |
 | 4,000 | bisect | 7749.7 | 10000.0 | 3812.59 | 0.0 | 2512 | 0.838 | 1.932 | FAIL |
 | 8,000 | search | 10000.0 | 10000.0 | 2948.03 | 0.0 | 703525 | 0.854 | 1.536 | FAIL |
 
