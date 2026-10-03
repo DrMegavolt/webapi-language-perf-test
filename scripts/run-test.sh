@@ -22,7 +22,7 @@ kubectl -n $NS create configmap langperf-k6-script \
 
 run_k6() {  # $1 = mode, $2 = duration, $3 = results basename
   local MODE=$1 DUR=$2 BASENAME=$3
-  kubectl -n $NS delete job langperf-k6 --ignore-not-found
+  kubectl -n $NS delete job langperf-k6 --ignore-not-found >/dev/null 2>&1
   sed "s|__BASE_URL__|http://langperf-$APP.$NS.svc.cluster.local|; s|__RATE__|$RATE|; s|__DURATION__|$DUR|; s|__MODE__|$MODE|" \
     k8s/k6-job.yaml | kubectl apply -f - >/dev/null
   if ! kubectl -n $NS wait --for=condition=complete job/langperf-k6 --timeout=1200s >/dev/null 2>&1; then
