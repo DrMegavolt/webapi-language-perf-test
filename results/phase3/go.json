@@ -1,0 +1,38 @@
+{
+  "app": "go",
+  "level_rps": 10000,
+  "pool_size": 32,
+  "runs": 3,
+  "gate_pass_runs": 0,
+  "p99_ms": [
+    9410.0,
+    9238.34,
+    9274.97
+  ],
+  "served_ratio": [
+    0.788,
+    0.852,
+    0.835
+  ],
+  "error_5xx": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "cpu_avg_cores": [
+    0.737,
+    0.747,
+    0.742
+  ],
+  "pg_cpu_cores": [
+    3.126,
+    3.044,
+    3.115
+  ],
+  "k6_dropped": [
+    303987,
+    205499,
+    232124
+  ],
+  "note": "1 CPU per app, POOL_SIZE=32, fresh DB per app, k6 mix 75/25 read/write"
+}

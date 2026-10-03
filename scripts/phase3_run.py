@@ -21,13 +21,16 @@ OUTDIR = os.path.join(K.REPO, "results", "phase3")
 def deploy(app):
     K.log(f"deploy langperf-{app} (POOL_SIZE={POOL_SIZE}, 1 CPU)")
     K.sh(f"kubectl apply -f apps/{app}/k8s.yaml")
-    K.sh(
-        f"kubectl -n {K.NS} patch deploy langperf-{app} --type merge -p "
-        f"'{{\"spec\":{{\"template\":{{\"spec\":{{\"containers\":[{{\"name\":\"app\","
-        f"\"env\":[{{\"name\":\"POOL_SIZE\",\"value\":\"{POOL_SIZE}\"}}]}}]}}}}}}}}'"
-    )
+    r = K.sh(f"kubectl -n {K.NS} set env deploy/langperf-{app} POOL_SIZE={POOL_SIZE}")
+    if r.returncode != 0:
+        raise RuntimeError(f"set env failed: {r.stderr[:300]}")
     if K.sh(f"kubectl -n {K.NS} rollout status deploy/langperf-{app} --timeout=300s").returncode != 0:
         raise RuntimeError("rollout failed")
+    env = K.sh(f"kubectl -n {K.NS} get deploy langperf-{app} -o "
+               f"jsonpath={{.spec.template.spec.containers[0].env}}").stdout
+    if "POOL_SIZE" not in env:
+        raise RuntimeError("POOL_SIZE env missing after set — aborting rather than measuring pool=8")
+    K.log(f"env verified: {env}")
     time.sleep(5)
 
 

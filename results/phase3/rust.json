@@ -1,0 +1,38 @@
+{
+  "app": "rust",
+  "level_rps": 10000,
+  "pool_size": 32,
+  "runs": 3,
+  "gate_pass_runs": 0,
+  "p99_ms": [
+    4566.74,
+    4381.52,
+    2497.91
+  ],
+  "served_ratio": [
+    0.87,
+    0.873,
+    0.887
+  ],
+  "error_5xx": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "cpu_avg_cores": [
+    0.743,
+    0.708,
+    0.71
+  ],
+  "pg_cpu_cores": [
+    4.864,
+    4.759,
+    4.733
+  ],
+  "k6_dropped": [
+    176008,
+    169786,
+    150849
+  ],
+  "note": "1 CPU per app, POOL_SIZE=32, fresh DB per app, k6 mix 75/25 read/write"
+}

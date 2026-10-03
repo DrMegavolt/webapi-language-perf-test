@@ -68,19 +68,24 @@ export const options = {
 function rnd(max) { return 1 + Math.floor(Math.random() * max); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+// Overqueue guard: a request slower than TIMEOUT_BUDGET is an error, not a slow success.
+// Fails fast, frees the VU, and keeps the server from poisoning the run with 10s campers.
+const TIMEOUT_BUDGET = __ENV.TIMEOUT_BUDGET || '2s';
+
 export default function () {
   const r = Math.random();
   if (r < 0.55) {
-    const res = http.get(`${BASE}/feed?page=${rnd(50)}`, { tags: { name: 'GET /feed' } });
+    const res = http.get(`${BASE}/feed?page=${rnd(50)}`, { tags: { name: 'GET /feed' }, timeout: TIMEOUT_BUDGET });
     check(res, { 'feed 200': (res) => res.status === 200 });
   } else if (r < 0.75) {
-    const res = http.get(`${BASE}/posts/${rnd(500000)}`, { tags: { name: 'GET /posts/:id' } });
+    const res = http.get(`${BASE}/posts/${rnd(500000)}`, { tags: { name: 'GET /posts/:id' }, timeout: TIMEOUT_BUDGET });
     check(res, { 'post 200': (res) => res.status === 200 });
   } else if (r < 0.90) {
     const payload = JSON.stringify({ user_id: rnd(50000), content: pick(CONTENTS) });
     const res = http.post(`${BASE}/posts`, payload, {
       headers: { 'Content-Type': 'application/json' },
       tags: { name: 'POST /posts' },
+      timeout: TIMEOUT_BUDGET,
     });
     check(res, { 'post 201': (res) => res.status === 201 });
   } else {
@@ -88,6 +93,7 @@ export default function () {
     const res = http.post(`${BASE}/posts/${rnd(500000)}/like`, payload, {
       headers: { 'Content-Type': 'application/json' },
       tags: { name: 'POST /posts/:id/like' },
+      timeout: TIMEOUT_BUDGET,
     });
     check(res, { 'like 200/404': (res) => res.status === 200 || res.status === 404 });
   }
