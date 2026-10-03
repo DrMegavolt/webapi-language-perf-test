@@ -25,7 +25,7 @@ NS = "langperf"
 PROM = "http://192.168.1.174:9090"
 DURATION_S = 150
 START_LEVEL = 2000
-MAX_LEVEL = 32000
+MAX_LEVEL = 64000
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTDIR = os.path.join(REPO, "results", "limits")
 
@@ -97,6 +97,8 @@ def run_k6(app, rate, label):
             "offered_rps": rate,
             "label": label,
             "k6_completed": ok,
+            "k6_rps": k6.get("rps"),
+            "k6_iterations": k6.get("iterations"),
             "k6_dropped": k6.get("dropped_iterations", 0),
             "k6_failed_rate": k6.get("failed_rate", 0),
             "k6_p99_ms": k6.get("p99_ms"),
@@ -114,18 +116,22 @@ def run_k6(app, rate, label):
             ), 3),
         }
     )
+    served = k6.get("rps") or 0
+    rec["served_ratio"] = round(served / rate, 3) if rate else 0
     rec["gate_pass"] = bool(
         ok
         and rec.get("p99_ms", 1e9) < 1000
         and rec.get("error_rate_5xx", 1) == 0
         and rec.get("k6_failed_rate", 1) == 0
         and rec.get("k6_dropped", 1) == 0
+        and rec["served_ratio"] >= 0.95
     )
     with open(prom_file, "w") as f:
         json.dump(rec, f, indent=2)
     log(
         f"rate={rate:>6} {label:<8} -> p99={rec.get('p99_ms')}ms err={rec.get('error_rate_5xx')} "
-        f"dropped={rec.get('k6_dropped')} appcpu={rec.get('cpu_avg_cores')} pgcpu={rec.get('pg_cpu_cores')} "
+        f"served={served:.0f} ({rec['served_ratio']*100:.0f}%) dropped={rec.get('k6_dropped')} "
+        f"appcpu={rec.get('cpu_avg_cores')} pgcpu={rec.get('pg_cpu_cores')} "
         f"k6cpu={rec.get('k6_cpu_cores')} GATE={'PASS' if rec['gate_pass'] else 'FAIL'}"
     )
     return rec
@@ -153,7 +159,7 @@ def classify(rec):
         return "k6 generator saturated"
     if app_cpu >= 0.9:
         return "app CPU (1 core)"
-    if pg >= 3.6:
+    if pg >= 5.5:
         return "postgres ceiling"
     return "latency collapse (queueing)"
 
@@ -161,6 +167,10 @@ def classify(rec):
 def main(app):
     os.makedirs(OUTDIR, exist_ok=True)
     curve = []
+
+    # always run the current script version, never a stale configmap
+    sh("kubectl -n langperf create configmap langperf-k6-script "
+       "--from-file=loadtest.js=k6/loadtest.js --dry-run=client -o yaml | kubectl apply -f -")
 
     log(f"deploy langperf-{app}")
     sh(f"kubectl apply -f apps/{app}/k8s.yaml")
@@ -234,7 +244,8 @@ def main(app):
         "confirm_err": [c.get("error_rate_5xx") for c in confirms],
         "curve": [
             {k: c.get(k) for k in ("offered_rps", "label", "p50_ms", "p95_ms", "p99_ms", "p999_ms",
-                                    "rps", "error_rate_5xx", "cpu_avg_cores", "pg_cpu_cores",
+                                    "rps", "k6_rps", "served_ratio", "error_rate_5xx",
+                                    "cpu_avg_cores", "pg_cpu_cores",
                                     "k6_cpu_cores", "k6_dropped", "k6_failed_rate", "gate_pass")}
             for c in curve
         ],
