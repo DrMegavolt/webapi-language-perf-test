@@ -31,7 +31,7 @@ spec:
               value: "__MODE__"
           resources:
             requests:
-              cpu: "4"
+              cpu: "2"
               memory: 2Gi
             limits:
               cpu: "4"

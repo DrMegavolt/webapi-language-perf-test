@@ -25,12 +25,13 @@ run_k6() {  # $1 = mode, $2 = duration, $3 = results basename
   kubectl -n $NS delete job langperf-k6 --ignore-not-found >/dev/null 2>&1
   sed "s|__BASE_URL__|http://langperf-$APP.$NS.svc.cluster.local|; s|__RATE__|$RATE|; s|__DURATION__|$DUR|; s|__MODE__|$MODE|" \
     k8s/k6-job.yaml | kubectl apply -f - >/dev/null
+  local START
+  START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if ! kubectl -n $NS wait --for=condition=complete job/langperf-k6 --timeout=1200s >/dev/null 2>&1; then
     echo "K6 JOB FAILED for $APP (mode=$MODE); last log lines:" >&2
     kubectl -n $NS logs job/langperf-k6 --tail=25 >&2 || true
     return 1
   fi
-  START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   kubectl -n $NS logs job/langperf-k6 > results/$BASENAME.k6.log 2>&1 || true
   grep 'K6SUMMARY ' results/$BASENAME.k6.log | sed 's/^.*K6SUMMARY //' > results/$BASENAME.k6.json || true
   echo "$START"

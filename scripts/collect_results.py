@@ -127,7 +127,7 @@ def collect_ramp(args, start, end, prom, app):
     p95s, p99s, rpss, errs = series(p95_expr), series(p99_expr), series(rps_expr), series(err_expr)
     buckets = []
     for t in sorted(rpss):
-        rps = rpss.get(t)
+        rps = float(rpss.get(t, 0))
         p95 = float(p95s.get(t, 0)) * 1000
         p99 = float(p99s.get(t, 0)) * 1000
         err = float(errs.get(t, 0.0))
