@@ -30,7 +30,8 @@ def load():
     for f in glob.glob(os.path.join(RESULTS, "*.prom.json")):
         with open(f) as fh:
             d = json.load(fh)
-        data[d["app"]] = d
+        if d.get("mode") == "baseline":
+            data[d["app"]] = d
     return [data[a] for a in ORDER if a in data]
 
 

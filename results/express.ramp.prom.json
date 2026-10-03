@@ -1,0 +1,77 @@
+{
+  "app": "express",
+  "mode": "ramp",
+  "window": {
+    "start": "2026-10-03T05:12:25Z",
+    "end": "2026-10-03T05:16:44Z"
+  },
+  "buckets": [
+    {
+      "t": "05:12:55",
+      "rps": 325.7,
+      "p95_ms": 1.5,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:13:25",
+      "rps": 525.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.7,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:13:55",
+      "rps": 725.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.6,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:14:25",
+      "rps": 925.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:14:55",
+      "rps": 1125.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:15:25",
+      "rps": 1325.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:15:55",
+      "rps": 1525.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:16:25",
+      "rps": 1725.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    }
+  ],
+  "max_passing_rps": 1725.7,
+  "first_failing_rps": null,
+  "passed_whole_ramp": true
+}

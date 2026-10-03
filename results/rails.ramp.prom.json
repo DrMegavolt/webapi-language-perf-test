@@ -1,0 +1,77 @@
+{
+  "app": "rails",
+  "mode": "ramp",
+  "window": {
+    "start": "2026-10-03T05:43:13Z",
+    "end": "2026-10-03T05:47:32Z"
+  },
+  "buckets": [
+    {
+      "t": "05:43:43",
+      "rps": 300.1,
+      "p95_ms": 1.9,
+      "p99_ms": 4.2,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:44:13",
+      "rps": 500.1,
+      "p95_ms": 1.9,
+      "p99_ms": 4.3,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:44:43",
+      "rps": 700.1,
+      "p95_ms": 1.9,
+      "p99_ms": 4.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:45:13",
+      "rps": 900.1,
+      "p95_ms": 2.6,
+      "p99_ms": 6.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:45:43",
+      "rps": 1100.2,
+      "p95_ms": 3.2,
+      "p99_ms": 7.2,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:46:13",
+      "rps": 1300.1,
+      "p95_ms": 3.9,
+      "p99_ms": 7.4,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:46:43",
+      "rps": 1500.3,
+      "p95_ms": 4.5,
+      "p99_ms": 8.2,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:47:13",
+      "rps": 1615.7,
+      "p95_ms": 4.9,
+      "p99_ms": 9.0,
+      "err_rate": 0.0,
+      "pass": true
+    }
+  ],
+  "max_passing_rps": 1615.7,
+  "first_failing_rps": null,
+  "passed_whole_ramp": true
+}

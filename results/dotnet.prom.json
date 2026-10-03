@@ -1,0 +1,51 @@
+{
+  "app": "dotnet",
+  "mode": "baseline",
+  "window": {
+    "start": "2026-10-03T05:47:38Z",
+    "end": "2026-10-03T05:52:57Z",
+    "seconds": 319
+  },
+  "scrape_up": 1.0,
+  "p50_ms": 0.78,
+  "p95_ms": 1.69,
+  "p99_ms": 1.95,
+  "p999_ms": 4.0,
+  "rps": 179.46,
+  "error_rate_5xx": 0.0,
+  "cpu_avg_cores": 0.119,
+  "mem_max_mb": 73.2,
+  "rss_self_max_mb": 134.8,
+  "routes": {
+    "/feed": {
+      "p50_ms": 0.8,
+      "p95_ms": 1.69,
+      "p999_ms": 4.17,
+      "rps": 98.99
+    },
+    "/posts": {
+      "p50_ms": 0.6,
+      "p95_ms": 0.97,
+      "p999_ms": 3.65,
+      "rps": 26.39
+    },
+    "/posts/:id": {
+      "p50_ms": 0.76,
+      "p95_ms": 1.11,
+      "p999_ms": 2.63,
+      "rps": 35.98
+    },
+    "/posts/:id/like": {
+      "p50_ms": 1.1,
+      "p95_ms": 1.92,
+      "p999_ms": 4.24,
+      "rps": 18.09
+    }
+  },
+  "gates": {
+    "p95_lt_500ms": true,
+    "p99_lt_1s": true,
+    "error_lt_1pct": true,
+    "pass": true
+  }
+}

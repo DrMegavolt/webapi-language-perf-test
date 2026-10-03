@@ -1,0 +1,77 @@
+{
+  "app": "python",
+  "mode": "ramp",
+  "window": {
+    "start": "2026-10-03T05:32:56Z",
+    "end": "2026-10-03T05:37:15Z"
+  },
+  "buckets": [
+    {
+      "t": "05:33:26",
+      "rps": 301.3,
+      "p95_ms": 1.8,
+      "p99_ms": 2.0,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:33:56",
+      "rps": 501.3,
+      "p95_ms": 1.4,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:34:26",
+      "rps": 701.3,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:34:56",
+      "rps": 901.3,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:35:26",
+      "rps": 1101.2,
+      "p95_ms": 1.2,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:35:56",
+      "rps": 1301.3,
+      "p95_ms": 1.2,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:36:26",
+      "rps": 1501.3,
+      "p95_ms": 1.2,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:36:56",
+      "rps": 1701.3,
+      "p95_ms": 1.4,
+      "p99_ms": 2.0,
+      "err_rate": 0.0,
+      "pass": true
+    }
+  ],
+  "max_passing_rps": 1701.3,
+  "first_failing_rps": null,
+  "passed_whole_ramp": true
+}

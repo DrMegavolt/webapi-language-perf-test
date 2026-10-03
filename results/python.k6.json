@@ -1,0 +1,1 @@
+{"mode":"baseline","rps":null,"p50_ms":null,"p95_ms":null,"p99_ms":null,"p999_ms":null,"max_ms":0,"failed_rate":0,"checks_rate":0,"dropped_iterations":0,"per_endpoint":{"GET /feed":{"p50":null,"p95":null,"p999":null},"GET /posts/:id":{"p50":null,"p95":null,"p999":null},"POST /posts":{"p50":null,"p95":null,"p999":null},"POST /posts/:id/like":{"p50":null,"p95":null,"p999":null}}}

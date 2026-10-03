@@ -1,0 +1,77 @@
+{
+  "app": "dotnet",
+  "mode": "ramp",
+  "window": {
+    "start": "2026-10-03T05:53:27Z",
+    "end": "2026-10-03T05:57:46Z"
+  },
+  "buckets": [
+    {
+      "t": "05:53:57",
+      "rps": 250.9,
+      "p95_ms": 1.1,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:54:27",
+      "rps": 451.0,
+      "p95_ms": 1.1,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:54:57",
+      "rps": 650.9,
+      "p95_ms": 1.0,
+      "p99_ms": 1.8,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:55:27",
+      "rps": 851.1,
+      "p95_ms": 1.0,
+      "p99_ms": 1.7,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:55:57",
+      "rps": 1051.1,
+      "p95_ms": 1.0,
+      "p99_ms": 1.6,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:56:27",
+      "rps": 1250.7,
+      "p95_ms": 1.0,
+      "p99_ms": 1.7,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:56:57",
+      "rps": 1450.9,
+      "p95_ms": 1.0,
+      "p99_ms": 1.7,
+      "err_rate": 0.0,
+      "pass": true
+    },
+    {
+      "t": "05:57:27",
+      "rps": 1651.0,
+      "p95_ms": 1.2,
+      "p99_ms": 1.9,
+      "err_rate": 0.0,
+      "pass": true
+    }
+  ],
+  "max_passing_rps": 1651.0,
+  "first_failing_rps": null,
+  "passed_whole_ramp": true
+}

@@ -128,8 +128,12 @@ def collect_ramp(args, start, end, prom, app):
     buckets = []
     for t in sorted(rpss):
         rps = float(rpss.get(t, 0))
+        if rps < 1.0:
+            continue  # idle edge bucket (no traffic) — no verdict possible
         p95 = float(p95s.get(t, 0)) * 1000
         p99 = float(p99s.get(t, 0)) * 1000
+        p95 = p95 if p95 == p95 else 0.0  # NaN guard (empty rate window)
+        p99 = p99 if p99 == p99 else 0.0
         err = float(errs.get(t, 0.0))
         err = err if err == err else 0.0  # NaN (0/0) when the app served nothing
         ok = p95 < 500 and p99 < 1000 and err < 0.01
@@ -152,6 +156,7 @@ def collect_ramp(args, start, end, prom, app):
         "buckets": buckets,
         "max_passing_rps": round(max(passing), 1) if passing else 0.0,
         "first_failing_rps": round(min(failing), 1) if failing else None,
+        "passed_whole_ramp": not failing,
     }
 
 
