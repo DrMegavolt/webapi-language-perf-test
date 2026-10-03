@@ -21,7 +21,7 @@ spec:
       containers:
         - name: app
           image: localhost:32000/langperf/dotnet:v1
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
