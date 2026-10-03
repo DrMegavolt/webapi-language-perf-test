@@ -1,0 +1,18 @@
+{
+  "name": "langperf-express",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny Twitter-style API for the langperf benchmark (Node 22 + Express 5 + pg)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "pg": "^8.0.0",
+    "prom-client": "^15.0.0"
+  }
+}

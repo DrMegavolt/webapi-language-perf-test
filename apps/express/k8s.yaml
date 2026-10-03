@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langperf-express
+  namespace: langperf
+  labels:
+    app.kubernetes.io/name: express
+    app.kubernetes.io/part-of: langperf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: express
+  template:
+    metadata:
+      labels:
+        app: express
+        app.kubernetes.io/name: express
+        app.kubernetes.io/part-of: langperf
+    spec:
+      containers:
+        - name: app
+          image: localhost:32000/langperf/express:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: postgres://bench:bench@postgres.langperf.svc.cluster.local:5432/bench
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langperf-express
+  namespace: langperf
+  labels:
+    app.kubernetes.io/name: express
+    app.kubernetes.io/part-of: langperf
+spec:
+  selector:
+    app.kubernetes.io/name: express
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

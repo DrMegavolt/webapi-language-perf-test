@@ -1,0 +1,28 @@
+{
+  "name": "langperf-nestjs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny Twitter-style API for the langperf benchmark (NestJS 11 + Fastify + pg)",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-fastify": "^11.0.0",
+    "fastify": "5.11.3",
+    "pg": "^8.13.0",
+    "prom-client": "^15.1.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langperf-k6
+  namespace: langperf
+  labels:
+    app: langperf-k6
+    app.kubernetes.io/part-of: langperf
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: langperf-k6
+        app.kubernetes.io/part-of: langperf
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:2.3.0
+          args: ["run", "/k6/loadtest.js", "-q"]
+          env:
+            - name: BASE_URL
+              value: "__BASE_URL__"
+            - name: RATE
+              value: "__RATE__"
+            - name: DURATION
+              value: "__DURATION__"
+            - name: MODE
+              value: "__MODE__"
+          resources:
+            requests:
+              cpu: "4"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+          volumeMounts:
+            - name: script
+              mountPath: /k6
+      volumes:
+        - name: script
+          configMap:
+            name: langperf-k6-script

@@ -1,0 +1,11 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.k6.log
+node_modules/
+target/
+apps/rails/tmp/
+apps/*/dist/
+apps/dotnet/bin/
+apps/dotnet/obj/
