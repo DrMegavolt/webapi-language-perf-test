@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langperf-results
+  namespace: langperf
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: microk8s-hostpath
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langperf-orchestrator
+  namespace: langperf
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: langperf-orchestrator
+        app.kubernetes.io/part-of: langperf
+    spec:
+      serviceAccountName: langperf-orchestrator
+      restartPolicy: Never
+      containers:
+        - name: orchestrator
+          image: localhost:32000/langperf/orchestrator:v1
+          imagePullPolicy: Always
+          env:
+            - name: PROM
+              value: http://kube-prom-stack-kube-prome-prometheus.observability.svc.cluster.local:9090
+            - name: POOL_SIZE
+              value: "16"
+            - name: START_LEVEL
+              value: "5000"
+            - name: MAX_LEVEL
+              value: "32000"
+            - name: OUTDIR
+              value: /results/limits-v3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: langperf-results

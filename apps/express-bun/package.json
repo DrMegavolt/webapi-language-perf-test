@@ -1,11 +1,11 @@
 {
-  "name": "langperf-express",
+  "name": "langperf-express-bun",
   "version": "1.0.0",
   "private": true,
-  "description": "Tiny Twitter-style API for the langperf benchmark (Node 22 + Express 5 + pg)",
+  "description": "Tiny Twitter-style API for the langperf benchmark (Bun runtime + Express 5 + pg)",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "bun src/server.js"
   },
   "engines": {
     "node": ">=22"

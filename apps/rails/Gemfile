@@ -21,6 +21,11 @@ gem "bootsnap", require: false
 # Prometheus metrics exposition (http_request_duration_seconds, http_requests_total)
 gem "prometheus-client", "~> 5.0"
 
+# OpenTelemetry tracing: one SERVER span per request + one CLIENT span per SQL
+# statement, exported via OTLP/HTTP (protobuf) to <endpoint>/v1/traces.
+gem "opentelemetry-sdk", "~> 1.13"
+gem "opentelemetry-exporter-otlp", "~> 0.37"
+
 # Add HTTP asset caching/compression and X-Sendfile acceleration to Puma [https://github.com/basecamp/thruster/]
 gem "thruster", require: false
 

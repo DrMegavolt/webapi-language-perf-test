@@ -1,0 +1,10 @@
+.git
+.venv
+results
+apps/*/node_modules
+apps/*/target
+apps/*/dist
+apps/rails/log
+apps/rails/tmp
+*.k6.log
+__pycache__

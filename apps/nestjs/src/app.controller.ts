@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpCode, HttpException, Param, Post, Query, Res } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import { Body, Controller, Get, HttpCode, HttpException, Param, Post, Query, Req, Res } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DbService } from './db.service';
 import { MetricsService } from './metrics.service';
+import { requestSpan, withDbSpan } from './tracing';
 
 // ---------------------------------------------------------------------------
 // Canonical SQL — byte-identical to sql/queries.sql (Q1, Q2, Q3, Q4a-c).
@@ -78,30 +79,49 @@ export class AppController {
 
   // Q1 (GET /feed?page=N): home feed, newest 20 posts with author + like count
   @Get('feed')
-  async feed(@Query('page') page: unknown): Promise<Record<string, unknown>> {
+  async feed(
+    @Query('page') page: unknown,
+    @Req() request: FastifyRequest,
+  ): Promise<Record<string, unknown>> {
     let p = Number(page === undefined || page === null || page === '' ? 1 : page);
     if (!Number.isFinite(p) || p < 1) p = 1;
     p = Math.floor(p);
-    const { rows } = await this.db.query(Q1, [p]);
+    const { rows } = await withDbSpan(requestSpan(request), 'DB Q1 feed', () =>
+      this.db.query(Q1, [p]),
+    );
     return { page: p, posts: rows.map(mapPostRow) };
   }
 
   // Q2 (GET /posts/:id): single post with author + like count
   @Get('posts/:id')
-  async getPost(@Param('id') id: string): Promise<Record<string, unknown>> {
+  async getPost(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<Record<string, unknown>> {
     const postId = parsePostId(id);
     if (postId === undefined) throw badRequest('invalid post id');
-    const { rows } = await this.db.query(Q2, [postId]);
+    const { rows } = await withDbSpan(
+      requestSpan(request),
+      'DB Q2 single post',
+      () => this.db.query(Q2, [postId]),
+    );
     if (rows.length === 0) throw postNotFound();
     return mapPostRow(rows[0]);
   }
 
   // Q3 (POST /posts): create post — exactly one statement, no pre-check.
   @Post('posts')
-  async createPost(@Body() body: any): Promise<Record<string, unknown>> {
+  async createPost(
+    @Body() body: any,
+    @Req() request: FastifyRequest,
+  ): Promise<Record<string, unknown>> {
     const payload = body ?? {};
     try {
-      const { rows } = await this.db.query(Q3, [payload.user_id, payload.content]);
+      const { rows } = await withDbSpan(
+        requestSpan(request),
+        'DB Q3 create post',
+        () => this.db.query(Q3, [payload.user_id, payload.content]),
+      );
       const row = rows[0];
       return {
         id: row.id,
@@ -125,19 +145,27 @@ export class AppController {
   async like(
     @Param('id') id: string,
     @Body() body: any,
+    @Req() request: FastifyRequest,
   ): Promise<Record<string, unknown>> {
     const postId = parsePostId(id);
     if (postId === undefined) throw badRequest('invalid post id');
+    const span = requestSpan(request);
 
     // 4a: missing post -> 404 {"error":"post not found"}
-    const post = await this.db.query(Q4A, [postId]);
+    const post = await withDbSpan(span, 'DB Q4a post exists', () =>
+      this.db.query(Q4A, [postId]),
+    );
     if (post.rows.length === 0) throw postNotFound();
 
     // 4b: idempotent insert
-    await this.db.query(Q4B, [postId, (body ?? {}).user_id]);
+    await withDbSpan(span, 'DB Q4b insert like', () =>
+      this.db.query(Q4B, [postId, (body ?? {}).user_id]),
+    );
 
     // 4c: fresh count for the response
-    const count = await this.db.query(Q4C, [postId]);
+    const count = await withDbSpan(span, 'DB Q4c like count', () =>
+      this.db.query(Q4C, [postId]),
+    );
 
     return { post_id: postId, like_count: count.rows[0].like_count };
   }

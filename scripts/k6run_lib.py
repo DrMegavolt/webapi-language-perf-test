@@ -9,8 +9,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 NS = "langperf"
-PROM = "http://192.168.1.174:9090"
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROM = os.environ.get("PROM", "http://192.168.1.174:9090")
+REPO = os.environ.get("REPO_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def sh(cmd):

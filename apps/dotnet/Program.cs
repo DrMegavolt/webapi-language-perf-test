@@ -3,6 +3,10 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Npgsql;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +21,42 @@ var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL")
 // The spec's DATABASE_URL is a postgres:// URI; Npgsql 10's builder wants key/value
 // form, so parse the URI here (pool capped at 8 connections per the spec).
 var dataSource = NpgsqlDataSource.Create(BuildConnectionString(databaseUrl));
+
+// OpenTelemetry tracing (contract shared across all langperf stacks): one fresh
+// SERVER root Activity per API request ("HTTP <METHOD> <route>", opened in the
+// metrics middleware below) and one CLIENT child Activity per SQL statement
+// ("DB Q1 feed" etc.). Export: OTLP/HTTP (protobuf) to
+// <OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces, batched every 500ms (prompt flush),
+// 100% sampled.
+var activitySource = new ActivitySource("langperf", "1.0.0");
+
+var otlpEndpoint = (Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
+        ?? "http://otel-gateway-collector.observability.svc.cluster.local:4318")
+    .TrimEnd('/');
+
+// A user-set OtlpExporterOptions.Endpoint is used verbatim (the exporter does
+// not append the signal path), so build the trace URL here — exactly the
+// sibling stacks' POST <endpoint>/v1/traces contract.
+var otlpTraceUrl = otlpEndpoint.EndsWith("/v1/traces", StringComparison.Ordinal)
+    ? otlpEndpoint
+    : $"{otlpEndpoint}/v1/traces";
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(serviceName: "langperf-dotnet"))
+    .WithTracing(tracing => tracing
+        .AddSource("langperf")
+        .SetSampler(new AlwaysOnSampler()) // 100% sampling
+        .AddOtlpExporter(exporter =>
+        {
+            exporter.Protocol = OtlpExportProtocol.HttpProtobuf;
+            exporter.Endpoint = new Uri(otlpTraceUrl);
+            exporter.BatchExportProcessorOptions = new BatchExportProcessorOptions<Activity>
+            {
+                ScheduledDelayMilliseconds = 500, // prompt flush per the tracing contract
+            };
+        }));
+
+const string RootActivityKey = "langperf.root-activity";
 
 // Hand-rolled metrics on the default registry (exact names, labels and buckets per the spec).
 var durationHistogram = Metrics.CreateHistogram(
@@ -69,6 +109,10 @@ string? MapRouteLabel(string? path)
 var app = builder.Build();
 
 // Registered before the endpoint mappings so it wraps the full request handling.
+// Also owns tracing: one fresh SERVER root Activity ("HTTP <METHOD> <route>")
+// per API request, started before the app runs and stopped after the response,
+// measuring wall time around the whole request. The Activity is stashed in
+// HttpContext.Items so handlers can parent their DB spans explicitly.
 app.Use(async (context, next) =>
 {
     var route = MapRouteLabel(context.Request.Path.Value);
@@ -79,12 +123,26 @@ app.Use(async (context, next) =>
     }
 
     var start = Stopwatch.GetTimestamp();
+
+    // Fresh root per request: no context extraction (k6 sends no trace
+    // headers), so drop any ambient Activity before starting the root.
+    var priorActivity = Activity.Current;
+    Activity.Current = null;
+    using var rootActivity = activitySource.StartActivity(
+        $"HTTP {context.Request.Method} {route}", ActivityKind.Server);
+    rootActivity?.SetTag("http.method", context.Request.Method);
+    rootActivity?.SetTag("http.route", route);
+    context.Items[RootActivityKey] = rootActivity;
+
     try
     {
         await next(context);
     }
     finally
     {
+        rootActivity?.Stop();
+        Activity.Current = priorActivity;
+
         var elapsed = Stopwatch.GetElapsedTime(start).TotalSeconds;
         var method = context.Request.Method;
         var status = context.Response.StatusCode.ToString(CultureInfo.InvariantCulture);
@@ -123,25 +181,30 @@ app.MapGet("/feed", async Task<IResult> (HttpContext context) =>
         ? parsed
         : 1;
 
-    var posts = new List<object>(20);
-    await using var conn = await dataSource.OpenConnectionAsync();
-    await using (var cmd = new NpgsqlCommand(FeedSql, conn))
+    var posts = await WithDbSpanAsync(activitySource, context, "DB Q1 feed", async () =>
     {
-        cmd.Parameters.AddWithValue(page);
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        var list = new List<object>(20);
+        await using var conn = await dataSource.OpenConnectionAsync();
+        await using (var cmd = new NpgsqlCommand(FeedSql, conn))
         {
-            posts.Add(new
+            cmd.Parameters.AddWithValue(page);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                id = reader.GetInt64(0),
-                user_id = reader.GetInt64(1),
-                username = reader.GetString(2),
-                content = reader.GetString(3),
-                created_at = reader.GetDateTime(4),
-                like_count = reader.GetInt64(5),
-            });
+                list.Add(new
+                {
+                    id = reader.GetInt64(0),
+                    user_id = reader.GetInt64(1),
+                    username = reader.GetString(2),
+                    content = reader.GetString(3),
+                    created_at = reader.GetDateTime(4),
+                    like_count = reader.GetInt64(5),
+                });
+            }
         }
-    }
+
+        return list;
+    });
 
     return Results.Ok(new { page, posts });
 });
@@ -186,18 +249,19 @@ app.MapPost("/posts", async Task<IResult> (HttpContext context) =>
         var content = contentElement.GetString()!;
 
         await using var conn = await dataSource.OpenConnectionAsync();
-        long id;
-        DateTime createdAt;
+        (long Id, DateTime CreatedAt) row = default;
         await using (var cmd = new NpgsqlCommand(CreatePostSql, conn))
         {
             cmd.Parameters.AddWithValue(userId);
             cmd.Parameters.AddWithValue(content);
             try
             {
-                await using var reader = await cmd.ExecuteReaderAsync();
-                await reader.ReadAsync();
-                id = reader.GetInt64(0);
-                createdAt = reader.GetDateTime(3);
+                row = await WithDbSpanAsync(activitySource, context, "DB Q3 create post", async () =>
+                {
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    await reader.ReadAsync();
+                    return (Id: reader.GetInt64(0), CreatedAt: reader.GetDateTime(3));
+                });
             }
             catch (PostgresException ex) when (ex.SqlState == "23503")
             {
@@ -207,7 +271,7 @@ app.MapPost("/posts", async Task<IResult> (HttpContext context) =>
         }
 
         return Results.Json(
-            new { id, user_id = userId, content, created_at = createdAt, like_count = 0L },
+            new { id = row.Id, user_id = userId, content, created_at = row.CreatedAt, like_count = 0L },
             statusCode: 201);
     }
 });
@@ -254,7 +318,7 @@ app.MapPost("/posts/{id}/like", async Task<IResult> (HttpContext context, string
         await using (var cmd = new NpgsqlCommand(PostExistsSql, conn))
         {
             cmd.Parameters.AddWithValue(postId);
-            if (await cmd.ExecuteScalarAsync() is null)
+            if (await WithDbSpanAsync(activitySource, context, "DB Q4a post exists", () => cmd.ExecuteScalarAsync()) is null)
             {
                 return Results.NotFound(new { error = "post not found" });
             }
@@ -267,7 +331,7 @@ app.MapPost("/posts/{id}/like", async Task<IResult> (HttpContext context, string
             {
                 cmd.Parameters.AddWithValue(postId);
                 cmd.Parameters.AddWithValue(userId);
-                await cmd.ExecuteNonQueryAsync();
+                await WithDbSpanAsync(activitySource, context, "DB Q4b insert like", () => cmd.ExecuteNonQueryAsync());
             }
         }
         catch (PostgresException ex) when (ex.SqlState == "23503")
@@ -280,7 +344,7 @@ app.MapPost("/posts/{id}/like", async Task<IResult> (HttpContext context, string
         await using (var cmd = new NpgsqlCommand(LikeCountSql, conn))
         {
             cmd.Parameters.AddWithValue(postId);
-            likeCount = (long)(await cmd.ExecuteScalarAsync())!;
+            likeCount = await WithDbSpanAsync(activitySource, context, "DB Q4c like count", async () => (long)(await cmd.ExecuteScalarAsync())!);
         }
 
         return Results.Ok(new { post_id = postId, like_count = likeCount });
@@ -298,7 +362,7 @@ const string SinglePostSql = """
     GROUP BY p.id, p.user_id, u.username, p.content, p.created_at;
     """;
 
-app.MapGet("/posts/{id}", async Task<IResult> (string id) =>
+app.MapGet("/posts/{id}", async Task<IResult> (HttpContext context, string id) =>
 {
     if (!long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var postId))
     {
@@ -309,20 +373,23 @@ app.MapGet("/posts/{id}", async Task<IResult> (string id) =>
     await using (var cmd = new NpgsqlCommand(SinglePostSql, conn))
     {
         cmd.Parameters.AddWithValue(postId);
-        await using var reader = await cmd.ExecuteReaderAsync();
-        if (!await reader.ReadAsync())
+        return await WithDbSpanAsync(activitySource, context, "DB Q2 single post", async () =>
         {
-            return Results.NotFound(new { error = "post not found" });
-        }
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return (IResult)Results.NotFound(new { error = "post not found" });
+            }
 
-        return Results.Ok(new
-        {
-            id = reader.GetInt64(0),
-            user_id = reader.GetInt64(1),
-            username = reader.GetString(2),
-            content = reader.GetString(3),
-            created_at = reader.GetDateTime(4),
-            like_count = reader.GetInt64(5),
+            return (IResult)Results.Ok(new
+            {
+                id = reader.GetInt64(0),
+                user_id = reader.GetInt64(1),
+                username = reader.GetString(2),
+                content = reader.GetString(3),
+                created_at = reader.GetDateTime(4),
+                like_count = reader.GetInt64(5),
+            });
         });
     }
 });
@@ -338,6 +405,33 @@ app.MapGet("/healthz", async Task<IResult> () =>
 app.MapMetrics("/metrics");
 
 app.Run();
+
+// CLIENT Activity around one DB round-trip (wall time start -> end), parented
+// explicitly on the request's SERVER root Activity via its Id (Activity.Current
+// flows via async context — explicit parenting is safest).
+static async Task<T> WithDbSpanAsync<T>(ActivitySource source, HttpContext context, string name, Func<Task<T>> run)
+{
+    using var span = StartDbSpan(source, context, name);
+    try
+    {
+        return await run().ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+        throw;
+    }
+}
+
+static Activity? StartDbSpan(ActivitySource source, HttpContext context, string name)
+{
+    var parent = context.Items.TryGetValue(RootActivityKey, out var value)
+        ? value as Activity
+        : null;
+    var span = source.StartActivity(name, ActivityKind.Client, parent?.Id);
+    span?.SetTag("db.system", "postgresql");
+    return span;
+}
 
 static string BuildConnectionString(string url)
 {

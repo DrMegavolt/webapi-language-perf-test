@@ -6,17 +6,19 @@ class PostsController < ApplicationController
     id = parse_integer(params[:id])
     return render_error(:bad_request, "invalid post id") if id.nil?
 
-    row = ActiveRecord::Base.connection.exec_query(
-      <<~SQL.squish, "posts.show", [sql_bind("id", id, INT_TYPE)]
-        SELECT p.id, p.user_id, u.username, p.content, p.created_at,
-               COUNT(l.id)::bigint AS like_count
-        FROM posts p
-        JOIN users u ON u.id = p.user_id
-        LEFT JOIN likes l ON l.post_id = p.id
-        WHERE p.id = $1
-        GROUP BY p.id, p.user_id, u.username, p.content, p.created_at
-      SQL
-    ).first
+    row = LangperfOtel.db_span("DB Q2 single post") do
+      ActiveRecord::Base.connection.exec_query(
+        <<~SQL.squish, "posts.show", [sql_bind("id", id, INT_TYPE)]
+          SELECT p.id, p.user_id, u.username, p.content, p.created_at,
+                 COUNT(l.id)::bigint AS like_count
+          FROM posts p
+          JOIN users u ON u.id = p.user_id
+          LEFT JOIN likes l ON l.post_id = p.id
+          WHERE p.id = $1
+          GROUP BY p.id, p.user_id, u.username, p.content, p.created_at
+        SQL
+      ).first
+    end
 
     return render_error(:not_found, "post not found") unless row
 
@@ -32,13 +34,15 @@ class PostsController < ApplicationController
     content = params[:content]
     return render_error(:bad_request, "invalid content") unless content.is_a?(String)
 
-    row = ActiveRecord::Base.connection.exec_query(
-      <<~SQL.squish, "posts.create", [sql_bind("user_id", user_id, INT_TYPE), sql_bind("content", content, TEXT_TYPE)]
-        INSERT INTO posts (user_id, content, created_at)
-        VALUES ($1, $2, now())
-        RETURNING id, user_id, content, created_at
-      SQL
-    ).first
+    row = LangperfOtel.db_span("DB Q3 create post") do
+      ActiveRecord::Base.connection.exec_query(
+        <<~SQL.squish, "posts.create", [sql_bind("user_id", user_id, INT_TYPE), sql_bind("content", content, TEXT_TYPE)]
+          INSERT INTO posts (user_id, content, created_at)
+          VALUES ($1, $2, now())
+          RETURNING id, user_id, content, created_at
+        SQL
+      ).first
+    end
 
     render json: {
       "id" => row["id"],

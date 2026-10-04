@@ -21,6 +21,7 @@ Bundler.require(*Rails.groups)
 # Rack middleware must be a real class when passed to config.middleware
 # (string constantization was removed in Rails 7), so require it explicitly.
 require_relative "../app/middleware/request_metrics"
+require_relative "../app/middleware/request_tracing"
 
 module App
   class Application < Rails::Application
@@ -48,5 +49,11 @@ module App
     # Record one Prometheus observation per handled request (route-pattern
     # labels). Outer position keeps full request handling inside the window.
     config.middleware.insert_before Rack::Runtime, RequestMetrics
+
+    # OpenTelemetry SERVER span per API request ("HTTP <METHOD> <route>").
+    # Placed just before (i.e. outside) RequestMetrics so the span wraps the
+    # full request handling, metrics recording included. Controllers open
+    # CLIENT child spans per SQL statement via LangperfOtel.db_span.
+    config.middleware.insert_before RequestMetrics, RequestTracing
   end
 end

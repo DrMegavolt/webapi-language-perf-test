@@ -10,6 +10,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 import { MetricsService } from './metrics.service';
+import { endRequestSpan, normalizeRoute, startRequestSpan } from './tracing';
 
 async function bootstrap(): Promise<void> {
   const adapter = new FastifyAdapter();
@@ -21,14 +22,23 @@ async function bootstrap(): Promise<void> {
 
   // Wall-clock timing around the full request handling (includes body parse
   // + DB time), observed exactly once per request via Fastify hooks.
+  //
+  // Tracing uses the same hooks: a fresh SERVER root span per API request is
+  // opened in onRequest (Fastify routes before onRequest, so routeOptions.url
+  // is the authoritative pattern) and closed in onResponse after the response
+  // has been sent. /metrics, /healthz and unmatched paths get no spans.
   const fastify = app.getHttpAdapter().getInstance();
   const metrics = app.get(MetricsService);
   fastify.addHook('onRequest', (request, reply, done) => {
     metrics.onRequest(request);
+    const route = normalizeRoute(request.routeOptions?.url);
+    if (route) startRequestSpan(request, request.method, route);
     done();
   });
   fastify.addHook('onResponse', (request, reply, done) => {
     metrics.onResponse(request, reply);
+    const route = normalizeRoute(request.routeOptions?.url);
+    if (route) endRequestSpan(request, request.method, route);
     done();
   });
 

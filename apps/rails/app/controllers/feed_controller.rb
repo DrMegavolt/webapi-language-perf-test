@@ -9,21 +9,23 @@ class FeedController < ApplicationController
     # The page number is bound as $1 and the offset is computed in SQL,
     # OFFSET ($1 - 1) * 20 — exactly the canonical Q1 from sql/queries.sql.
     # CTE form: pick 20 posts via the index BEFORE joining/counting likes.
-    rows = ActiveRecord::Base.connection.exec_query(<<~SQL.squish, "feed", [sql_bind("page", page, INT_TYPE)])
-      WITH feed AS (
-        SELECT p.id, p.user_id, p.content, p.created_at
-        FROM posts p
-        ORDER BY p.created_at DESC, p.id DESC
-        LIMIT 20 OFFSET ($1 - 1) * 20
-      )
-      SELECT f.id, f.user_id, u.username, f.content, f.created_at,
-             COUNT(l.id)::bigint AS like_count
-      FROM feed f
-      JOIN users u ON u.id = f.user_id
-      LEFT JOIN likes l ON l.post_id = f.id
-      GROUP BY f.id, f.user_id, u.username, f.content, f.created_at
-      ORDER BY f.created_at DESC, f.id DESC
-    SQL
+    rows = LangperfOtel.db_span("DB Q1 feed") do
+      ActiveRecord::Base.connection.exec_query(<<~SQL.squish, "feed", [sql_bind("page", page, INT_TYPE)])
+        WITH feed AS (
+          SELECT p.id, p.user_id, p.content, p.created_at
+          FROM posts p
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT 20 OFFSET ($1 - 1) * 20
+        )
+        SELECT f.id, f.user_id, u.username, f.content, f.created_at,
+               COUNT(l.id)::bigint AS like_count
+        FROM feed f
+        JOIN users u ON u.id = f.user_id
+        LEFT JOIN likes l ON l.post_id = f.id
+        GROUP BY f.id, f.user_id, u.username, f.content, f.created_at
+        ORDER BY f.created_at DESC, f.id DESC
+      SQL
+    end
 
     posts = rows.map do |row|
       {

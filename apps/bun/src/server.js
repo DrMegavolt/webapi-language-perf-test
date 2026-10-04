@@ -7,8 +7,15 @@
 //   labels and buckets from the spec. /metrics and /healthz are not recorded.
 // - app_memory_rss_bytes is refreshed on every recorded request from
 //   /proc/self/status VmRSS (kB) * 1024.
+// - Tracing: hand-rolled OTLP/HTTP JSON export (BatchSpanProcessor semantics:
+//   100% sampling, spans batched in memory, flushed every 500ms to
+//   <OTEL_EXPORTER_OTLP_ENDPOINT>/v1/traces). One SERVER root span per
+//   canonical request, one CLIENT span per SQL statement. @opentelemetry/*
+//   npm packages were tried first but their node:http transport sends
+//   empty bodies under Bun, hence the hand-rolled exporter.
 
 import { SQL } from "bun";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const PORT = Number(process.env.PORT || 8080);
@@ -73,6 +80,118 @@ const sql = new SQL({
   idleTimeout: 30,
   maxLifetime: 0,
 });
+
+// ---------------------------------------------------------------------------
+// Tracing — hand-rolled OTLP/HTTP JSON export with BatchSpanProcessor
+// semantics (100% sampling, in-memory batch, 500ms scheduled flush).
+// Span kinds: SERVER=2, CLIENT=3. IDs: 16-byte hex traceId, 8-byte hex
+// spanId. Timestamps: epoch nanoseconds as strings.
+// ---------------------------------------------------------------------------
+const OTEL_ENDPOINT = (
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
+  "http://otel-gateway-collector.observability.svc.cluster.local:4318"
+).replace(/\/+$/, "");
+const SPAN_KIND_SERVER = 2;
+const SPAN_KIND_CLIENT = 3;
+
+// Epoch-nanosecond clock: Date.now() anchor + monotonic hrtime deltas.
+const EPOCH_NANO_ANCHOR = BigInt(Date.now()) * 1_000_000n;
+const MONO_NANO_ANCHOR = process.hrtime.bigint();
+function nowNanos() {
+  return (EPOCH_NANO_ANCHOR + (process.hrtime.bigint() - MONO_NANO_ANCHOR)).toString();
+}
+
+function hexId(bytes) {
+  return randomBytes(bytes).toString("hex");
+}
+
+function strAttr(key, value) {
+  return { key, value: { stringValue: String(value) } };
+}
+
+function startSpan(parentCtx, name, kind) {
+  return {
+    traceId: parentCtx ? parentCtx.traceId : hexId(16),
+    spanId: hexId(8),
+    parentSpanId: parentCtx ? parentCtx.spanId : null,
+    name,
+    kind,
+    startNanos: nowNanos(),
+    attributes: [],
+  };
+}
+
+// Completed spans waiting for the next scheduled export.
+const pendingSpans = [];
+
+function endSpan(span) {
+  span.endNanos = nowNanos();
+  pendingSpans.push(span);
+}
+
+function toOtlpSpan(s) {
+  const out = {
+    traceId: s.traceId,
+    spanId: s.spanId,
+    name: s.name,
+    kind: s.kind,
+    startTimeUnixNano: s.startNanos,
+    endTimeUnixNano: s.endNanos,
+    attributes: s.attributes,
+  };
+  if (s.parentSpanId) out.parentSpanId = s.parentSpanId;
+  return out;
+}
+
+function flushSpans() {
+  if (pendingSpans.length === 0) return;
+  const batch = pendingSpans.splice(0, pendingSpans.length);
+  const payload = {
+    resourceSpans: [
+      {
+        resource: { attributes: [strAttr("service.name", "langperf-bun")] },
+        scopeSpans: [
+          {
+            scope: { name: "langperf-bun", version: "1.0.0" },
+            spans: batch.map(toOtlpSpan),
+          },
+        ],
+      },
+    ],
+  };
+  fetch(`${OTEL_ENDPOINT}/v1/traces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then((r) => {
+      if (!r.ok) console.error(`otlp trace export failed: ${r.status}`);
+    })
+    .catch((e) => console.error(`otlp trace export error: ${e}`));
+}
+
+const flushTimer = setInterval(flushSpans, 500);
+if (typeof flushTimer.unref === "function") flushTimer.unref();
+
+// SERVER root span per canonical request. parentCtx doubles as the parent
+// reference for the DB CLIENT spans (same trace, parentSpanId = root span).
+function startServerSpan(method, route) {
+  const span = startSpan(null, `HTTP ${method} ${route}`, SPAN_KIND_SERVER);
+  span.attributes = [strAttr("http.method", method), strAttr("http.route", route)];
+  return span;
+}
+
+// CLIENT span around one SQL statement's wall time (the DB round-trip).
+async function dbSpan(parentCtx, name, fn) {
+  if (!parentCtx) return fn();
+  const span = startSpan(parentCtx, name, SPAN_KIND_CLIENT);
+  span.attributes = [strAttr("db.system", "postgresql")];
+  try {
+    return await fn();
+  } finally {
+    endSpan(span);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Metrics (hand-rolled Prometheus exposition — exact names/labels/buckets).
@@ -196,22 +315,22 @@ async function readJsonBody(req) {
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
-async function handleFeed(url) {
+async function handleFeed(url, parentCtx) {
   const raw = url.searchParams.get("page");
   const n = raw === null ? 1 : Number(raw);
   const page = Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
   const offset = (page - 1) * 20;
-  const rows = await sql.unsafe(Q1_FEED, [offset]);
+  const rows = await dbSpan(parentCtx, "DB Q1 feed", () => sql.unsafe(Q1_FEED, [offset]));
   return jsonResponse(200, { page, posts: rows.map(postItem) });
 }
 
-async function handleGetPost(id) {
-  const rows = await sql.unsafe(Q2_POST, [id]);
+async function handleGetPost(id, parentCtx) {
+  const rows = await dbSpan(parentCtx, "DB Q2 single post", () => sql.unsafe(Q2_POST, [id]));
   if (rows.length === 0) return jsonResponse(404, { error: "post not found" });
   return jsonResponse(200, postItem(rows[0]));
 }
 
-async function handleCreatePost(req) {
+async function handleCreatePost(req, parentCtx) {
   const body = await readJsonBody(req);
   if (body === null) return jsonResponse(400, { error: "invalid body" });
   if (!Number.isInteger(body.user_id)) return jsonResponse(400, { error: "invalid user_id" });
@@ -219,7 +338,9 @@ async function handleCreatePost(req) {
 
   let rows;
   try {
-    rows = await sql.unsafe(Q3_INSERT, [body.user_id, body.content]);
+    rows = await dbSpan(parentCtx, "DB Q3 create post", () =>
+      sql.unsafe(Q3_INSERT, [body.user_id, body.content])
+    );
   } catch (e) {
     if (isConstraintInsertFailure(e)) return jsonResponse(400, { error: "invalid user_id" });
     throw e;
@@ -234,26 +355,32 @@ async function handleCreatePost(req) {
   });
 }
 
-async function handleLike(id, req) {
+async function handleLike(id, req, parentCtx) {
   const body = await readJsonBody(req);
   if (body === null || !Number.isInteger(body.user_id)) {
     return jsonResponse(400, { error: "invalid user_id" });
   }
 
   // Q4a: post must exist
-  const exists = await sql.unsafe(Q4A_EXISTS, [id]);
+  const exists = await dbSpan(parentCtx, "DB Q4a post exists", () =>
+    sql.unsafe(Q4A_EXISTS, [id])
+  );
   if (exists.length === 0) return jsonResponse(404, { error: "post not found" });
 
   // Q4b: idempotent insert
   try {
-    await sql.unsafe(Q4B_LIKE, [id, body.user_id]);
+    await dbSpan(parentCtx, "DB Q4b insert like", () =>
+      sql.unsafe(Q4B_LIKE, [id, body.user_id])
+    );
   } catch (e) {
     if (isConstraintInsertFailure(e)) return jsonResponse(400, { error: "invalid user_id" });
     throw e;
   }
 
   // Q4c: fresh count
-  const counted = await sql.unsafe(Q4C_COUNT, [id]);
+  const counted = await dbSpan(parentCtx, "DB Q4c like count", () =>
+    sql.unsafe(Q4C_COUNT, [id])
+  );
   return jsonResponse(200, { post_id: toNum(id), like_count: toNum(counted[0].like_count) });
 }
 
@@ -306,19 +433,21 @@ Bun.serve({
     if (route === null) return jsonResponse(404, { error: "not found" });
 
     const start = performance.now();
+    // SERVER root span per canonical request (fresh trace; no propagation).
+    const rootSpan = startServerSpan(method, route);
     let res;
     try {
       if (idPart !== null && !ID_RE.test(idPart)) {
         // Non-numeric :id -> 400, never reaches the DB.
         res = jsonResponse(400, { error: "invalid post id" });
       } else if (route === "/feed") {
-        res = await handleFeed(url);
+        res = await handleFeed(url, rootSpan);
       } else if (route === "/posts") {
-        res = await handleCreatePost(req);
+        res = await handleCreatePost(req, rootSpan);
       } else if (route === "/posts/:id") {
-        res = await handleGetPost(Number(idPart));
+        res = await handleGetPost(Number(idPart), rootSpan);
       } else {
-        res = await handleLike(Number(idPart), req);
+        res = await handleLike(Number(idPart), req, rootSpan);
       }
     } catch {
       res = jsonResponse(500, { error: "internal error" });
@@ -326,6 +455,7 @@ Bun.serve({
     // Observe exactly once, wall time around the full request handling
     // (includes body parse + DB time). /metrics and /healthz never get here.
     observe(method, route, String(res.status), (performance.now() - start) / 1000);
+    endSpan(rootSpan);
     return res;
   },
 });

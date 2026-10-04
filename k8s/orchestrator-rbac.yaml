@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: langperf-orchestrator
+  namespace: langperf
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: langperf-orchestrator
+  namespace: langperf
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "pods", "pods/log"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: langperf-orchestrator
+  namespace: langperf
+subjects:
+  - kind: ServiceAccount
+    name: langperf-orchestrator
+    namespace: langperf
+roleRef:
+  kind: Role
+  name: langperf-orchestrator
+  apiGroup: rbac.authorization.k8s.io

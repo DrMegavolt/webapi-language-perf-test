@@ -1,8 +1,9 @@
 'use strict';
 
-// langperf — Express 5 + pg (node-postgres) implementation.
-// Canonical SQL lives in sql/queries.sql at the repo root; the statements below
-// must stay byte-identical to Q1, Q2, Q3 and Q4a-c (parameter binding only).
+// langperf — Express 5 + pg (node-postgres) implementation, run on the Bun
+// runtime. Canonical SQL lives in sql/queries.sql at the repo root; the
+// statements below must stay byte-identical to Q1, Q2, Q3 and Q4a-c
+// (parameter binding only).
 
 const fs = require('node:fs');
 const express = require('express');
@@ -47,7 +48,7 @@ const OTEL_EXPORTER_ENDPOINT = (
 ).replace(/\/+$/, '');
 
 const tracerProvider = new BasicTracerProvider({
-  resource: resourceFromAttributes({ 'service.name': 'langperf-express' }),
+  resource: resourceFromAttributes({ 'service.name': 'langperf-express-bun' }),
   sampler: new AlwaysOnSampler(), // 100% sampling
   spanProcessors: [
     new BatchSpanProcessor(
@@ -56,7 +57,7 @@ const tracerProvider = new BasicTracerProvider({
     ),
   ],
 });
-const tracer = tracerProvider.getTracer('langperf.express');
+const tracer = tracerProvider.getTracer('langperf.express-bun');
 
 // ---------------------------------------------------------------------------
 // Metrics (SPEC.md "Metrics contract")
@@ -364,5 +365,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`langperf-express listening on 0.0.0.0:${PORT}`);
+  console.log(`langperf-express-bun listening on 0.0.0.0:${PORT}`);
 });

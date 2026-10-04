@@ -23,7 +23,7 @@ START_LEVEL = int(os.environ.get("START_LEVEL", "10000"))
 MAX_LEVEL = int(os.environ.get("MAX_LEVEL", "64000"))
 POOL_SIZE = os.environ.get("POOL_SIZE", "32")
 DURATION_S = 150
-OUTDIR = os.path.join(K.REPO, "results", "limits-v2")
+OUTDIR = os.environ.get("OUTDIR", os.path.join(K.REPO, "results", "limits-v2"))
 
 
 def deploy(app):

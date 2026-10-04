@@ -1,14 +1,21 @@
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use actix_web::body::MessageBody;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::http::StatusCode;
 use actix_web::middleware::{self, Next};
-use actix_web::{web, App, Error, HttpResponse, HttpServer};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, HttpMessage};
 use chrono::{DateTime, Utc};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+use opentelemetry::trace::{Span, SpanContext, SpanKind, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_sdk::resource::Resource;
+use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, SdkTracer, SdkTracerProvider};
 use prometheus::{
     default_registry, Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, Opts,
     TextEncoder,
@@ -119,6 +126,99 @@ async fn metrics_mw(
 }
 
 // ---------------------------------------------------------------------------
+// OpenTelemetry tracing — OTLP/HTTP (protobuf) export, 100% sampling.
+// One SERVER root span per canonical request ("HTTP <METHOD> <route>"); one
+// CLIENT span per SQL statement measuring the wall time of the DB round-trip.
+// /healthz and /metrics are never traced. No propagation context is needed:
+// the load generator sends no trace headers, so every request is a fresh root.
+// ---------------------------------------------------------------------------
+
+const OTEL_DEFAULT_ENDPOINT: &str =
+    "http://otel-gateway-collector.observability.svc.cluster.local:4318";
+
+static TRACER: LazyLock<SdkTracer> = LazyLock::new(|| {
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| OTEL_DEFAULT_ENDPOINT.to_string());
+    // Contract: POST <endpoint>/v1/traces. with_endpoint takes the trace URL
+    // verbatim, so append the signal path when absent.
+    let endpoint = if endpoint.trim_end_matches('/').ends_with("/v1/traces") {
+        endpoint
+    } else {
+        format!("{}/v1/traces", endpoint.trim_end_matches('/'))
+    };
+    let exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(&endpoint)
+        .with_protocol(Protocol::HttpBinary)
+        .with_timeout(Duration::from_secs(5))
+        .build()
+        .expect("build OTLP/HTTP span exporter");
+    let processor = BatchSpanProcessor::builder(exporter)
+        .with_batch_config(
+            BatchConfigBuilder::default()
+                .with_scheduled_delay(Duration::from_millis(500))
+                .build(),
+        )
+        .build();
+    let resource = Resource::builder_empty()
+        .with_attribute(KeyValue::new("service.name", "langperf-rust"))
+        .build();
+    let provider = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_span_processor(processor)
+        .build();
+    provider.tracer("langperf-rust")
+});
+
+/// SERVER root span middleware. Handlers receive the parent SpanContext via
+/// request extensions so their DB CLIENT spans join the same trace.
+async fn tracing_mw(
+    req: ServiceRequest,
+    next: Next<impl MessageBody>,
+) -> Result<ServiceResponse<impl MessageBody>, Error> {
+    let Some(route) = route_label(req.method().as_str(), req.match_pattern().as_deref()) else {
+        return next.call(req).await;
+    };
+    let method = req.method().as_str().to_owned();
+    let mut span = TRACER
+        .span_builder(format!("HTTP {method} {route}"))
+        .with_kind(SpanKind::Server)
+        .with_attributes([
+            KeyValue::new("http.method", method),
+            KeyValue::new("http.route", route),
+        ])
+        .start(&*TRACER);
+    req.extensions_mut()
+        .insert(span.span_context().clone());
+    let res = next.call(req).await?;
+    span.end();
+    Ok(res)
+}
+
+/// Runs `fut` inside a CLIENT span ("DB ...") parented on the request's server
+/// span; the span measures the wall time of the DB round-trip. Without a
+/// parent (healthz/metrics) the future runs untraced.
+async fn with_db_span<T, F>(parent: Option<&SpanContext>, name: &'static str, fut: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let Some(sc) = parent else {
+        return fut.await;
+    };
+    let cx = Context::new().with_remote_span_context(sc.clone());
+    let mut span = TRACER
+        .span_builder(name)
+        .with_kind(SpanKind::Client)
+        .with_attributes([KeyValue::new("db.system", "postgresql")])
+        .start_with_context(&*TRACER, &cx);
+    let out = fut.await;
+    span.end();
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Canonical SQL — must match sql/queries.sql exactly (Q1, Q2, Q3, Q4a-c)
 // ---------------------------------------------------------------------------
 
@@ -225,13 +325,19 @@ async fn db_client(pool: &Pool) -> Result<deadpool_postgres::Client, HttpRespons
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn feed(pool: web::Data<Pool>, q: web::Query<FeedQuery>) -> HttpResponse {
+async fn feed(
+    pool: web::Data<Pool>,
+    q: web::Query<FeedQuery>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let ext = req.extensions();
+    let sc = ext.get::<SpanContext>();
     let page = q.page.unwrap_or(1).max(1);
     let client = match db_client(&pool).await {
         Ok(c) => c,
         Err(res) => return res,
     };
-    match client.query(Q_FEED, &[&page]).await {
+    match with_db_span(sc, "DB Q1 feed", client.query(Q_FEED, &[&page])).await {
         Ok(rows) => {
             let posts = rows
                 .iter()
@@ -250,15 +356,21 @@ async fn feed(pool: web::Data<Pool>, q: web::Query<FeedQuery>) -> HttpResponse {
     }
 }
 
-async fn get_post(pool: web::Data<Pool>, path: web::Path<String>) -> HttpResponse {
+async fn get_post(
+    pool: web::Data<Pool>,
+    path: web::Path<String>,
+    req: HttpRequest,
+) -> HttpResponse {
     let Ok(id) = path.parse::<i64>() else {
         return err_json(StatusCode::BAD_REQUEST, "invalid post id");
     };
+    let ext = req.extensions();
+    let sc = ext.get::<SpanContext>();
     let client = match db_client(&pool).await {
         Ok(c) => c,
         Err(res) => return res,
     };
-    match client.query_opt(Q_POST, &[&id]).await {
+    match with_db_span(sc, "DB Q2 single post", client.query_opt(Q_POST, &[&id])).await {
         Ok(Some(r)) => HttpResponse::Ok().json(PostItem {
             id: r.get(0),
             user_id: r.get(1),
@@ -272,14 +384,23 @@ async fn get_post(pool: web::Data<Pool>, path: web::Path<String>) -> HttpRespons
     }
 }
 
-async fn create_post(pool: web::Data<Pool>, body: web::Json<CreatePostBody>) -> HttpResponse {
+async fn create_post(
+    pool: web::Data<Pool>,
+    body: web::Json<CreatePostBody>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let ext = req.extensions();
+    let sc = ext.get::<SpanContext>();
     let client = match db_client(&pool).await {
         Ok(c) => c,
         Err(res) => return res,
     };
-    match client
-        .query_one(Q_CREATE_POST, &[&body.user_id, &body.content])
-        .await
+    match with_db_span(
+        sc,
+        "DB Q3 create post",
+        client.query_one(Q_CREATE_POST, &[&body.user_id, &body.content]),
+    )
+    .await
     {
         Ok(r) => HttpResponse::Created().json(CreatedPost {
             id: r.get(0),
@@ -299,30 +420,48 @@ async fn like_post(
     pool: web::Data<Pool>,
     path: web::Path<String>,
     body: web::Json<LikeBody>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let Ok(post_id) = path.parse::<i64>() else {
         return err_json(StatusCode::BAD_REQUEST, "invalid post id");
     };
+    let ext = req.extensions();
+    let sc = ext.get::<SpanContext>();
     let client = match db_client(&pool).await {
         Ok(c) => c,
         Err(res) => return res,
     };
     // Q4a: post existence check — no row -> 404
-    match client.query_opt(Q_LIKE_CHECK, &[&post_id]).await {
+    match with_db_span(
+        sc,
+        "DB Q4a post exists",
+        client.query_opt(Q_LIKE_CHECK, &[&post_id]),
+    )
+    .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return err_json(StatusCode::NOT_FOUND, "post not found"),
         Err(_) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
     }
     // Q4b: idempotent insert
-    if client
-        .execute(Q_LIKE_INSERT, &[&post_id, &body.user_id])
-        .await
-        .is_err()
+    if with_db_span(
+        sc,
+        "DB Q4b insert like",
+        client.execute(Q_LIKE_INSERT, &[&post_id, &body.user_id]),
+    )
+    .await
+    .is_err()
     {
         return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
     }
     // Q4c: fresh count for the response
-    match client.query_one(Q_LIKE_COUNT, &[&post_id]).await {
+    match with_db_span(
+        sc,
+        "DB Q4c like count",
+        client.query_one(Q_LIKE_COUNT, &[&post_id]),
+    )
+    .await
+    {
         Ok(r) => HttpResponse::Ok().json(LikeResponse {
             post_id,
             like_count: r.get(0),
@@ -387,6 +526,8 @@ async fn main() -> std::io::Result<()> {
     LazyLock::force(&HTTP_DURATION);
     LazyLock::force(&HTTP_REQUESTS_TOTAL);
     LazyLock::force(&APP_MEMORY_RSS_BYTES);
+    // Force OTLP tracer provider init (exporter + batch processor) before serving.
+    LazyLock::force(&TRACER);
 
     println!("listening on 0.0.0.0:{port}");
 
@@ -394,6 +535,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .wrap(middleware::from_fn(metrics_mw))
+            .wrap(middleware::from_fn(tracing_mw))
             .route("/feed", web::get().to(feed))
             .route("/posts", web::post().to(create_post))
             .route("/posts/{id}", web::get().to(get_post))

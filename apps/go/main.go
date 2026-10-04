@@ -17,6 +17,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Canonical SQL — MUST match sql/queries.sql exactly (Q1, Q2, Q3, Q4a-c).
@@ -97,11 +103,95 @@ type createdPost struct {
 	LikeCount int64     `json:"like_count"`
 }
 
+var tracer = otel.Tracer("langperf/go")
+
+// initTracer wires the global TracerProvider: OTLP/HTTP (protobuf) export to
+// OTEL_EXPORTER_OTLP_ENDPOINT (POST <endpoint>/v1/traces), 100% sampling and a
+// BatchSpanProcessor with a 500ms schedule delay so short-lived runs flush.
+func initTracer(ctx context.Context) func(context.Context) error {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://otel-gateway-collector.observability.svc.cluster.local:4318"
+	}
+
+	exp, err := otlptracehttp.New(ctx,
+		// Contract: POST <endpoint>/v1/traces. WithEndpointURL takes the
+		// trace URL verbatim, so append the signal path when absent.
+		otlptracehttp.WithEndpointURL(signalURL(endpoint)),
+		otlptracehttp.WithTimeout(5*time.Second),
+	)
+	if err != nil {
+		log.Fatalf("create otlp exporter: %v", err)
+	}
+
+	res := resource.NewSchemaless(attribute.String("service.name", "langperf-go"))
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		// Default sampler is ParentBased(AlwaysSample) => 100% sampling.
+		sdktrace.WithBatcher(exp, sdktrace.WithBatchTimeout(500*time.Millisecond)),
+	)
+	otel.SetTracerProvider(tp)
+
+	return tp.Shutdown
+}
+
+// signalURL returns the OTLP/HTTP traces URL for the configured endpoint:
+// <endpoint>/v1/traces (tolerating a trailing slash and an existing path).
+func signalURL(endpoint string) string {
+	u := strings.TrimSuffix(endpoint, "/")
+	if !strings.HasSuffix(u, "/v1/traces") {
+		u += "/v1/traces"
+	}
+	return u
+}
+
+// requestTracing starts the SERVER root span per recorded request
+// ("HTTP <METHOD> <route>") and ends it after the response. /metrics, /healthz
+// and unmatched routes are never traced.
+func requestTracing() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if path == "/metrics" || path == "/healthz" {
+			c.Next()
+			return
+		}
+		route := c.FullPath()
+		if route == "" {
+			c.Next()
+			return
+		}
+
+		ctx, span := tracer.Start(c.Request.Context(), "HTTP "+c.Request.Method+" "+route,
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithAttributes(
+				attribute.String("http.method", c.Request.Method),
+				attribute.String("http.route", route),
+			))
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+		span.End()
+	}
+}
+
+// dbSpan wraps one SQL statement in a CLIENT span measuring the wall time
+// around the DB round-trip. fn receives the span context for the query call.
+func dbSpan(ctx context.Context, name string, fn func(context.Context) error) error {
+	ctx, span := tracer.Start(ctx, name,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("db.system", "postgresql")))
+	defer span.End()
+	return fn(ctx)
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL is required")
 	}
+
+	shutdownTracer := initTracer(context.Background())
+	defer shutdownTracer(context.Background())
 
 	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
@@ -125,6 +215,7 @@ func main() {
 	r := gin.New()
 	// metrics middleware outermost so panics (handled by Recovery) are still recorded
 	r.Use(requestMetrics())
+	r.Use(requestTracing())
 	r.Use(gin.Recovery())
 
 	r.GET("/feed", feedHandler(pool))
@@ -195,25 +286,26 @@ func feedHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			page = 1
 		}
 
-		rows, err := pool.Query(c.Request.Context(), qFeed, int32(page))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
-			return
-		}
-		defer rows.Close()
-
 		posts := make([]postItem, 0, 20)
-		for rows.Next() {
-			var p postItem
-			var createdAt time.Time
-			if err := rows.Scan(&p.ID, &p.UserID, &p.Username, &p.Content, &createdAt, &p.LikeCount); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
-				return
+		// pgx streams rows, so the DB round-trip spans Query() through rows.Err().
+		err = dbSpan(c.Request.Context(), "DB Q1 feed", func(ctx context.Context) error {
+			rows, err := pool.Query(ctx, qFeed, int32(page))
+			if err != nil {
+				return err
 			}
-			p.CreatedAt = createdAt.UTC()
-			posts = append(posts, p)
-		}
-		if err := rows.Err(); err != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var p postItem
+				var createdAt time.Time
+				if err := rows.Scan(&p.ID, &p.UserID, &p.Username, &p.Content, &createdAt, &p.LikeCount); err != nil {
+					return err
+				}
+				p.CreatedAt = createdAt.UTC()
+				posts = append(posts, p)
+			}
+			return rows.Err()
+		})
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
@@ -232,8 +324,10 @@ func getPostHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		var p postItem
 		var createdAt time.Time
-		err = pool.QueryRow(c.Request.Context(), qPost, id).
-			Scan(&p.ID, &p.UserID, &p.Username, &p.Content, &createdAt, &p.LikeCount)
+		err = dbSpan(c.Request.Context(), "DB Q2 single post", func(ctx context.Context) error {
+			return pool.QueryRow(ctx, qPost, id).
+				Scan(&p.ID, &p.UserID, &p.Username, &p.Content, &createdAt, &p.LikeCount)
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "post not found"})
 			return
@@ -265,8 +359,10 @@ func createPostHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			content   string
 			createdAt time.Time
 		)
-		err := pool.QueryRow(c.Request.Context(), qCreatePost, req.UserID, req.Content).
-			Scan(&id, &userID, &content, &createdAt)
+		err := dbSpan(c.Request.Context(), "DB Q3 create post", func(ctx context.Context) error {
+			return pool.QueryRow(ctx, qCreatePost, req.UserID, req.Content).
+				Scan(&id, &userID, &content, &createdAt)
+		})
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" { // SQLSTATE foreign_key_violation
@@ -307,7 +403,9 @@ func likePostHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		// Q4a
 		var exists int
-		err = pool.QueryRow(ctx, qLikeExists, id).Scan(&exists)
+		err = dbSpan(ctx, "DB Q4a post exists", func(ctx context.Context) error {
+			return pool.QueryRow(ctx, qLikeExists, id).Scan(&exists)
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "post not found"})
 			return
@@ -318,7 +416,11 @@ func likePostHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		// Q4b
-		if _, err := pool.Exec(ctx, qLikeInsert, id, req.UserID); err != nil {
+		err = dbSpan(ctx, "DB Q4b insert like", func(ctx context.Context) error {
+			_, err := pool.Exec(ctx, qLikeInsert, id, req.UserID)
+			return err
+		})
+		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" { // SQLSTATE foreign_key_violation
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
@@ -330,7 +432,10 @@ func likePostHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		// Q4c
 		var likeCount int64
-		if err := pool.QueryRow(ctx, qLikeCount, id).Scan(&likeCount); err != nil {
+		err = dbSpan(ctx, "DB Q4c like count", func(ctx context.Context) error {
+			return pool.QueryRow(ctx, qLikeCount, id).Scan(&likeCount)
+		})
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
