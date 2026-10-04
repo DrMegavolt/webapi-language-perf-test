@@ -127,7 +127,7 @@ def main(app):
     limit = last_pass
 
     confirms = []
-    if limit >= START_LEVEL:
+    if limit > 0:
         for i in range(1, 4):
             time.sleep(20)
             rec = K.run_k6(app, limit, f"confirm{i}", OUTDIR, duration_s=DURATION_S)

@@ -1,0 +1,63 @@
+{
+  "app": "bun",
+  "mode": "baseline",
+  "window": {
+    "start": "2026-10-03T23:09:27Z",
+    "end": "2026-10-03T23:12:05Z",
+    "seconds": 158
+  },
+  "scrape_up": 0.0,
+  "p50_ms": 2829.98,
+  "p95_ms": 6645.92,
+  "p99_ms": 9329.18,
+  "p999_ms": 9932.92,
+  "rps": 639.86,
+  "error_rate_5xx": 0.0,
+  "cpu_avg_cores": 0.101,
+  "mem_max_mb": 40.5,
+  "rss_self_max_mb": 143.9,
+  "routes": {
+    "/feed": {
+      "p50_ms": 2643.94,
+      "p95_ms": 4764.39,
+      "p999_ms": 4995.29,
+      "rps": 351.17
+    },
+    "/posts": {
+      "p50_ms": 2605.98,
+      "p95_ms": 4760.6,
+      "p999_ms": 4995.21,
+      "rps": 94.98
+    },
+    "/posts/:id": {
+      "p50_ms": 2632.82,
+      "p95_ms": 4763.28,
+      "p999_ms": 4995.27,
+      "rps": 129.74
+    },
+    "/posts/:id/like": {
+      "p50_ms": 6646.92,
+      "p95_ms": 9664.69,
+      "p999_ms": 9993.29,
+      "rps": 63.97
+    }
+  },
+  "gates": {
+    "p95_lt_500ms": false,
+    "p99_lt_1s": false,
+    "error_lt_1pct": true,
+    "pass": false
+  },
+  "offered_rps": 10000,
+  "label": "search",
+  "k6_completed": true,
+  "k6_rps": 1471.36,
+  "k6_iterations": 226196,
+  "k6_dropped": 1229760,
+  "k6_failed_rate": 0.8251958478487683,
+  "k6_p99_ms": 4135.7,
+  "served_ratio": 0.147,
+  "pg_cpu_cores": 0.302,
+  "k6_cpu_cores": 5.068,
+  "gate_pass": false
+}

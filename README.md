@@ -71,22 +71,46 @@ with its highest CPU per request (0.15 cores at just 200 rps).
 
 Rust 8MB · Go 15MB · Express 39MB · Python 42MB · NestJS 51MB · .NET 73MB · Rails 109MB
 
-## Phase 3 — 10k users, pool 32
+## Phase 3 — limits v2: pool 32, 2s request budget
 
-An earlier breaking-point search (adaptive ladder, pool=8) was **removed from the record**:
-with only 8 pooled connections per app, the measured "limits" were mostly the pool's drain
-rate, not the stacks' — apps died of pool-queue collapse (latency seconds, CPU idle, 100%
-still served) rather than real saturation.
+![limits](results/limits-v2.png)
 
-Phase 3 reruns all 8 stacks at a fixed **10,000 rps** ("users") with the constraint removed:
-`POOL_SIZE=32`, **1 CPU per app kept** (deliberate — at 10k rps per-request CPU cost becomes
-the binding constraint), fresh-seeded DB per stack, 3 runs per stack for averages, same
-k6 mix (75% reads / 25% writes) and same gate (p99 < 1s, 0 errors, 0 dropped, served ≥ 95%).
-Results: [`results/phase3/`](results/phase3) + `results/phase3-summary.md`.
+An earlier breaking-point search (pool=8) was removed: with 8 pooled connections the
+"limits" were the pool's drain rate, not the stacks. Phase 3 re-runs the search with
+**POOL_SIZE=32** and a hard **2s request budget enforced by k6** — any request slower than
+2s counts as an error and frees its VU instead of camping for 10s and clogging the run
+(the "overqueued server" pathology). Gate: server `p99 < 1s`, 0× 5xx, 0× k6 failures,
+0 dropped iterations, served ≥ 95% of offered. Adaptive ladder from 10k (×2 jumps, ×4 when
+easy, geometric bisection on failure), **3 fresh-seeded-DB confirmation runs** per stack,
+1 CPU / 1Gi per app kept. Full curves: [`results/limits-v2-summary.md`](results/limits-v2-summary.md).
 
-Postgres observability: pg_stat_statements is preloaded, and an OpenTelemetry collector
-(`langperf/otel-postgres`) scrapes the DB and ships `postgresql_*` metrics to Prometheus
-via OTLP — see the DB panels in the Grafana dashboard.
+| stack | stable limit (rps) | borderline above | first fail | bottleneck at failure | confirm p99 | max mem @ limit |
+|---|---|---|---|---|---|---|
+| Go (Gin) | **4,600** | — | 5000 | queueing (CPU 0.68) | 4.1 ms | 73 MB |
+| Rust (Actix) | **4,600** | — | 5000 | queueing (CPU 0.65) | 7.0 ms | 46 MB |
+| .NET (minimal) | **4,200** | 4,600 (flaky) | 5000 | **app CPU 0.95** | ~46 ms* | 314 MB |
+| Python (FastAPI) | 2,500 | 2,700 (flaky) | 3000 | **app CPU 0.94** | ~22 ms* | 77 MB |
+| TS (NestJS Fastify) | 2,300 | — | 2500 | queueing (CPU 0.56) | 3.5 ms | 56 MB |
+| TS (Express) | 2,100 | 2,300 (flaky) | 2500 | queueing (CPU 0.81) | ~60 ms* | 52 MB |
+| Bun (native) | 1,900 | — | 2100 | queueing (CPU 0.39) | 5.7 ms | 23 MB |
+| Ruby (Rails 8 YJIT) | 1,250 | 1,250 (flaky) | 1400 | queueing (CPU 0.73) | 9.4 ms | 129 MB |
+
+\* confirm average includes the failed wobbly runs at the knife edge.
+
+Findings:
+
+- **The Postgres pool is a tuning knob, not more-is-better.** With pool 32, Go's ceiling
+  *dropped* from 8,000 (pool 8) to 4,600 — 32 concurrent connections raise pg contention
+  and per-query latency. Pool ~8-16 is the sweet spot on a 6-core Postgres.
+- **The DB is never the bottleneck** (pg_stat_statements: feed 0.09-0.17ms, cache hit
+  99.999%, pg CPU ≤ 4.8 of 6 at every failure). Every wall is app-side: queueing collapse
+  (sub-10ms service, seconds of waiting, CPU idle) or raw 1-core CPU exhaustion
+  (.NET, Python — the only stacks that failed while pegged at ~0.95 cores).
+- **RAM is a symptom, not a cause**: at 10k rps with a 60s timeout, queued requests piled
+  memory to the 1Gi limit; with the 2s budget the same stacks hold 23-314MB at their
+  limits. The memory spike was queued work, not a leak.
+- Failures are cliffs everywhere: ±10% load = 100-400× p99. There is no gentle degradation
+  without an explicit timeout/load-shedding policy.
 
 ## The lesson that shaped the benchmark
 

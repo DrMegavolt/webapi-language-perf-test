@@ -1,0 +1,63 @@
+{
+  "app": "express",
+  "mode": "baseline",
+  "window": {
+    "start": "2026-10-03T23:37:08Z",
+    "end": "2026-10-03T23:39:41Z",
+    "seconds": 153
+  },
+  "scrape_up": 0.0,
+  "p50_ms": 0.78,
+  "p95_ms": 1.81,
+  "p99_ms": 3.37,
+  "p999_ms": 9.63,
+  "rps": 1394.18,
+  "error_rate_5xx": 0.0,
+  "cpu_avg_cores": 0.569,
+  "mem_max_mb": 127.2,
+  "rss_self_max_mb": 167.2,
+  "routes": {
+    "/feed": {
+      "p50_ms": 0.82,
+      "p95_ms": 1.83,
+      "p999_ms": 9.18,
+      "rps": 765.98
+    },
+    "/posts": {
+      "p50_ms": 0.39,
+      "p95_ms": 0.97,
+      "p999_ms": 7.72,
+      "rps": 209.89
+    },
+    "/posts/:id": {
+      "p50_ms": 0.78,
+      "p95_ms": 1.55,
+      "p999_ms": 9.4,
+      "rps": 279.14
+    },
+    "/posts/:id/like": {
+      "p50_ms": 1.0,
+      "p95_ms": 1.97,
+      "p999_ms": 20.0,
+      "rps": 139.18
+    }
+  },
+  "gates": {
+    "p95_lt_500ms": true,
+    "p99_lt_1s": true,
+    "error_lt_1pct": true,
+    "pass": true
+  },
+  "offered_rps": 1250,
+  "label": "probe",
+  "k6_completed": true,
+  "k6_rps": 1249.99,
+  "k6_iterations": 187502,
+  "k6_dropped": 0,
+  "k6_failed_rate": 0,
+  "k6_p99_ms": 2.66,
+  "served_ratio": 1.0,
+  "pg_cpu_cores": 0.622,
+  "k6_cpu_cores": 0.282,
+  "gate_pass": true
+}
