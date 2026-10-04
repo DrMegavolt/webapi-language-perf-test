@@ -10,6 +10,7 @@ COPY scripts/ scripts/
 COPY k8s/ k8s/
 COPY k6/ k6/
 COPY sql/ sql/
+COPY apps/ apps/
 
 ENV REPO_ROOT=/langperf
 CMD ["python3", "scripts/campaign_v3.py"]
