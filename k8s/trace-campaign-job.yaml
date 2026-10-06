@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langperf-trace-campaign
+  namespace: langperf
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: langperf-orchestrator
+        app.kubernetes.io/part-of: langperf
+    spec:
+      serviceAccountName: langperf-orchestrator
+      restartPolicy: Never
+      containers:
+        - name: orchestrator
+          image: localhost:32000/langperf/orchestrator:v1
+          imagePullPolicy: Always
+          command: ["python3", "scripts/trace_campaign.py"]
+          env:
+            - name: PROM
+              value: http://kube-prom-stack-kube-prome-prometheus.observability.svc.cluster.local:9090
+            - name: POOL_SIZE
+              value: "16"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: langperf-results

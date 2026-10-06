@@ -1,0 +1,25 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: langperf-auto
+  namespace: langperf
+spec:
+  exporter:
+    endpoint: http://tempo.observability.svc.cluster.local:4318
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: always_on
+  python:
+    env:
+      - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: http://tempo.observability.svc.cluster.local:4318/v1/traces
+  nodejs:
+    env:
+      - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: http://tempo.observability.svc.cluster.local:4318/v1/traces
+  dotnet:
+    env:
+      - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: http://tempo.observability.svc.cluster.local:4318/v1/traces

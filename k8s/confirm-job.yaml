@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langperf-confirm-pr
+  namespace: langperf
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: langperf-orchestrator
+        app.kubernetes.io/part-of: langperf
+    spec:
+      serviceAccountName: langperf-orchestrator
+      restartPolicy: Never
+      containers:
+        - name: orchestrator
+          image: localhost:32000/langperf/orchestrator:v1
+          imagePullPolicy: Always
+          command: ["python3", "-c"]
+          args:
+            - |
+              import sys, os
+              sys.path.insert(0, "/langperf/scripts")
+              os.environ.setdefault("POOL_SIZE", "16")
+              os.environ["OUTDIR"] = "/results/limits-v3-confirm"
+              import limit_search2 as LS
+              LS.OUTDIR = "/results/limits-v3-confirm"
+              LS.K.refresh_script_configmap()
+              LS.START_LEVEL = 2500
+              LS.main("python")
+              LS.START_LEVEL = 1000
+              LS.main("rails")
+          env:
+            - name: PROM
+              value: http://kube-prom-stack-kube-prome-prometheus.observability.svc.cluster.local:9090
+            - name: POOL_SIZE
+              value: "16"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: langperf-results

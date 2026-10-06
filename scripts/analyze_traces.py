@@ -39,9 +39,10 @@ class Tempo:
     def __init__(self, base):
         self.base = base.rstrip("/")
 
-    def search_ids(self, service, start, end, limit=250):
+    def search_ids(self, service, start=None, end=None, limit=250):
         q = f'{{resource.service.name="langperf-{service}"}}'
-        qs = urllib.parse.urlencode({"q": q, "start": start, "end": end, "limit": limit})
+        params = {"q": q, "limit": limit}
+        qs = urllib.parse.urlencode(params)
         with urllib.request.urlopen(f"{self.base}/api/search?{qs}", timeout=60) as r:
             d = json.load(r)
         return [t["traceID"] for t in d.get("traces", [])]
@@ -52,7 +53,7 @@ class Tempo:
 
 
 def parse_trace(doc):
-    """Return (http_durs_ns, {db_name: dur_ns}) for one trace."""
+    """Return (http_durs_ns, {db_name: dur_ns}) for one trace; skips timed-out roots."""
     http_durs, db_durs = [], {}
     for batch in doc.get("batches", []):
         for ss in batch.get("scopeSpans", []):
@@ -60,6 +61,8 @@ def parse_trace(doc):
                 name = s.get("name", "")
                 dur = int(s["endTimeUnixNano"]) - int(s["startTimeUnixNano"])
                 if name.startswith("HTTP "):
+                    if dur > 2_000_000_000:  # over the 2s budget = overqueue artifact
+                        continue
                     http_durs.append(dur)
                 elif name in DB_SPANS:
                     db_durs[name] = db_durs.get(name, 0) + dur
